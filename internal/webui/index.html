@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Narrato</title>
+<style>
+  :root { --bg:#0f1419; --card:#1a2332; --text:#e7ecf3; --muted:#9aa7b8; --accent:#3d8bfd; --warn:#e6a23c; --ok:#3ecf8e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:16px 24px; border-bottom:1px solid #2a3545; display:flex; gap:12px; align-items:center; }
+  h1 { margin:0; font-size:18px; font-weight:600; }
+  .badge { color:var(--muted); font-size:12px; }
+  nav { display:flex; gap:8px; padding:12px 24px; }
+  nav button { background:#243044; color:var(--text); border:0; padding:8px 14px; border-radius:8px; cursor:pointer; }
+  nav button.active { background:var(--accent); }
+  main { padding:0 24px 32px; max-width:980px; }
+  section { display:none; background:var(--card); border-radius:12px; padding:20px; margin-top:8px; }
+  section.active { display:block; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input, textarea, select { width:100%; padding:8px 10px; border-radius:8px; border:1px solid #334155; background:#0f1724; color:var(--text); }
+  textarea { min-height:120px; font-family:ui-monospace, Consolas, monospace; font-size:12px; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+  button.primary { background:var(--accent); color:#fff; border:0; padding:9px 14px; border-radius:8px; cursor:pointer; }
+  button.ghost { background:#243044; color:var(--text); border:0; padding:9px 14px; border-radius:8px; cursor:pointer; }
+  .hint { color:var(--muted); font-size:12px; margin-top:8px; }
+  .warn { color:var(--warn); }
+  .ok { color:var(--ok); }
+  pre.log { background:#0b1018; padding:12px; border-radius:8px; max-height:260px; overflow:auto; font-size:12px; white-space:pre-wrap; }
+  ul.paths { margin:8px 0; padding-left:18px; color:var(--muted); font-size:13px; }
+  .frames { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; margin-top:8px; }
+  .frames img { width:100%; height:110px; object-fit:contain; background:#0b1018; border-radius:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Narrato</h1>
+  <span class="badge" id="projBadge">未打开工程</span>
+</header>
+<nav>
+  <button class="active" data-tab="project">工程</button>
+  <button data-tab="assets">素材</button>
+  <button data-tab="script">脚本</button>
+  <button data-tab="render">合成</button>
+  <button data-tab="settings">设置</button>
+  <button data-tab="replicate">爆款复刻</button>
+</nav>
+<main>
+  <section id="project" class="active">
+    <label>工程名</label>
+    <input id="projName" placeholder="例如：女儿"/>
+    <div class="actions">
+      <button class="primary" onclick="createProject()">新建工程</button>
+      <button class="ghost" onclick="saveProject()">保存工程</button>
+    </div>
+    <label>打开已有工程</label>
+    <select id="projList"></select>
+    <div class="actions">
+      <button class="ghost" onclick="openProject()">打开</button>
+      <button class="ghost" onclick="refreshList()">刷新列表</button>
+    </div>
+    <p class="hint" id="projRoot"></p>
+  </section>
+
+  <section id="assets">
+    <label>视频路径（每行一个绝对路径）</label>
+    <textarea id="videos" placeholder="E:\videos\1.mp4"></textarea>
+    <label>字幕路径（每行一个）</label>
+    <textarea id="subs" placeholder="E:\srt\1.srt"></textarea>
+    <div class="actions">
+      <button class="primary" onclick="saveAssets()">应用到工程</button>
+    </div>
+  </section>
+
+  <section id="script">
+    <div class="row">
+      <div>
+        <label>文案字数</label>
+        <input id="wordCount" type="number" value="500"/>
+      </div>
+      <div>
+        <label>原片占比 %</label>
+        <input id="ratio" type="number" value="30"/>
+      </div>
+    </div>
+    <p class="hint" id="durationHint">预计时长 —</p>
+    <div class="actions">
+      <button class="primary" onclick="generateScript()">生成脚本（LLM）</button>
+    </div>
+    <label>脚本 JSON（可粘贴编辑后点「写入工程」）</label>
+    <textarea id="scriptJson"></textarea>
+    <div class="actions">
+      <button class="ghost" onclick="applyScriptJson()">写入工程</button>
+    </div>
+  </section>
+
+  <section id="render">
+    <label>TTS 音色</label>
+    <input id="voice" value="zh-CN-XiaoxiaoNeural"/>
+    <div class="actions">
+      <button class="primary" onclick="startRender()">开始合成</button>
+    </div>
+    <p class="hint" id="progressHint">进度 0%</p>
+    <pre class="log" id="logs"></pre>
+    <p class="hint" id="outHint"></p>
+  </section>
+
+  <section id="replicate">
+    <label>短视频路径（绝对路径）</label>
+    <input id="repVideo" placeholder="E:\videos\sample.mp4"/>
+    <div class="row">
+      <div>
+        <label>关键帧数</label>
+        <select id="repFrames">
+          <option>4</option><option>6</option><option selected>8</option><option>10</option>
+          <option>12</option><option>14</option><option>16</option>
+        </select>
+      </div>
+      <div>
+        <label>提示词模板</label>
+        <select id="repTemplate">
+          <option value="standard" selected>标准（与原版一致）</option>
+          <option value="replicate_expert">复刻SORA2视频提示词专家</option>
+          <option value="sora2_expert">SORA2视频提示词专家</option>
+        </select>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="primary" id="repBtn" onclick="runReplicate()">提取视频提示词 &amp; 关键帧</button>
+      <button class="ghost" onclick="openReplicateOut()">打开输出</button>
+      <button class="ghost" onclick="clearReplicate()">清空</button>
+    </div>
+    <p class="hint" id="repHint">视觉模型在「设置」中配置（默认 ModelScope Qwen3-VL）；结果保存在视频同目录 replicate_时间戳/ 下</p>
+    <label>提取的关键帧</label>
+    <div class="frames" id="repFramesView"></div>
+    <label>SORA2 提示词（可修改后复制使用）</label>
+    <textarea id="repPrompt" placeholder="(确认或修改) 提取出的提示词..."></textarea>
+    <div class="actions">
+      <button class="ghost" onclick="copyReplicate('repPrompt')">复制提示词</button>
+      <button class="ghost" onclick="copyReplicate('repPromptZh')">复制中文</button>
+    </div>
+    <textarea id="repPromptZh" style="display:none"></textarea>
+    <label>提取结果分析</label>
+    <textarea id="repAnalysis" readonly placeholder="提取出的提示词分析将显示在这里..."></textarea>
+  </section>
+
+  <section id="settings">
+    <label>LLM Base URL</label>
+    <input id="baseUrl"/>
+    <label>API Key</label>
+    <input id="apiKey" type="password"/>
+    <label>Model</label>
+    <input id="model"/>
+    <label>ffmpeg 路径（可空=PATH）</label>
+    <input id="ffmpeg"/>
+    <label>工程根目录</label>
+    <input id="projectsRoot"/>
+    <label>复刻 Base URL（OpenAI 兼容视觉模型）</label>
+    <input id="repBaseUrl" placeholder="https://api-inference.modelscope.cn/v1"/>
+    <label>复刻 API Key</label>
+    <input id="repApiKey" type="password"/>
+    <label>复刻视觉模型</label>
+    <input id="repModel" placeholder="Qwen/Qwen3-VL-8B-Instruct"/>
+    <label>目标总长（秒）</label>
+    <input id="targetSec" type="number" value="180"/>
+    <label><input id="hideOst" type="checkbox" checked/> 原声时段隐藏字幕与模糊</label>
+    <div class="actions">
+      <button class="primary" onclick="saveSettings()">保存设置</button>
+    </div>
+    <p class="hint" id="cfgPath"></p>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null;
+
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    $(btn.dataset.tab).classList.add('active');
+  };
+});
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = text; }
+  if (!res.ok) throw new Error(typeof data === 'string' ? data : (data.error || text));
+  return data;
+}
+
+function fillSettings(cfg, cfgPath, root) {
+  $('baseUrl').value = cfg.llm?.base_url || '';
+  $('apiKey').value = cfg.llm?.api_key || '';
+  $('model').value = cfg.llm?.model || '';
+  $('ffmpeg').value = cfg.ffmpeg?.path || '';
+  $('projectsRoot').value = cfg.paths?.projects_root || root || '';
+  $('targetSec').value = cfg.ui?.target_duration_sec || 180;
+  $('hideOst').checked = !!cfg.ui?.subtitle_hide_on_original;
+  $('voice').value = cfg.tts?.voice || 'zh-CN-XiaoxiaoNeural';
+  $('repBaseUrl').value = cfg.replicate?.base_url || '';
+  $('repApiKey').value = cfg.replicate?.api_key || '';
+  $('repModel').value = cfg.replicate?.model || '';
+  $('cfgPath').textContent = '配置文件: ' + cfgPath;
+  $('projRoot').textContent = '工程目录: ' + root;
+}
+
+function fillProject(p) {
+  if (!p) {
+    $('projBadge').textContent = '未打开工程';
+    $('videos').value = '';
+    $('subs').value = '';
+    $('scriptJson').value = '';
+    return;
+  }
+  $('projBadge').textContent = p.name + ' / ' + p.slug;
+  $('videos').value = (p.video_paths || []).join('\n');
+  $('subs').value = (p.subtitle_paths || []).join('\n');
+  $('scriptJson').value = JSON.stringify(p.script_items || [], null, 2);
+}
+
+async function refresh() {
+  state = await api('/api/state');
+  fillSettings(state.cfg, state.cfg_path, state.projects_root);
+  fillProject(state.project);
+  const hint = $('durationHint');
+  if (state.project && (state.project.script_items||[]).length) {
+    hint.textContent = `预计成片 ${state.estimated_clock}（约 ${Math.round(state.estimated_sec)}s） / 目标 ${state.target_sec}s`;
+    hint.className = 'hint' + (state.over_target ? ' warn' : ' ok');
+  } else {
+    hint.textContent = '预计时长 —';
+    hint.className = 'hint';
+  }
+  if (state.last_output) $('outHint').textContent = '成片: ' + state.last_output;
+}
+
+async function refreshList() {
+  const list = await api('/api/project/list');
+  const sel = $('projList');
+  sel.innerHTML = '';
+  (list || []).forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.slug;
+    opt.textContent = `${p.name} (${p.slug})`;
+    sel.appendChild(opt);
+  });
+}
+
+async function createProject() {
+  const name = $('projName').value.trim();
+  if (!name) return alert('请输入工程名');
+  await api('/api/project/create', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name}) });
+  await refresh(); await refreshList();
+}
+
+async function openProject() {
+  const slug = $('projList').value;
+  if (!slug) return alert('请选择工程');
+  await api('/api/project/open', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({slug}) });
+  await refresh();
+}
+
+async function saveProject() {
+  await api('/api/project/save', { method:'POST' });
+  alert('已保存');
+}
+
+async function saveAssets() {
+  const videos = $('videos').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  const subs = $('subs').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  await api('/api/assets', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({videos, subtitles:subs}) });
+  await refresh();
+  alert('素材已更新（记得点保存工程）');
+}
+
+async function generateScript() {
+  try {
+    const items = await api('/api/script/generate', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ word_count: +$('wordCount').value || 500, original_ratio: +$('ratio').value || 30 })
+    });
+    $('scriptJson').value = JSON.stringify(items, null, 2);
+    await refresh();
+    alert('生成成功：' + items.length + ' 条');
+  } catch (e) { alert(e.message || e); }
+}
+
+async function applyScriptJson() {
+  try {
+    const items = JSON.parse($('scriptJson').value || '[]');
+    await api('/api/script/set', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({items}) });
+    await refresh();
+    alert('已写入');
+  } catch (e) { alert(e.message || e); }
+}
+
+async function saveSettings() {
+  const cfg = {
+    llm: { base_url: $('baseUrl').value, api_key: $('apiKey').value, model: $('model').value },
+    tts: { voice: $('voice').value },
+    ffmpeg: { path: $('ffmpeg').value, ffprobe_path: '' },
+    ui: {
+      target_duration_sec: +$('targetSec').value || 180,
+      subtitle_hide_on_original: $('hideOst').checked,
+      subtitle_mask_enabled: false
+    },
+    paths: { projects_root: $('projectsRoot').value },
+    replicate: {
+      base_url: $('repBaseUrl').value.trim(),
+      api_key: $('repApiKey').value.trim(),
+      model: $('repModel').value.trim(),
+      frames: state?.cfg?.replicate?.frames || 8
+    }
+  };
+  await api('/api/save_settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
+  await refresh();
+  alert('设置已保存');
+}
+
+async function startRender() {
+  try {
+    await api('/api/render', { method:'POST' });
+    pollLogs();
+  } catch (e) { alert(e.message || e); }
+}
+
+async function pollLogs() {
+  const data = await api('/api/logs');
+  $('logs').textContent = (data.logs || []).join('\n');
+  $('progressHint').textContent = '进度 ' + (data.progress||0) + '%';
+  if (data.last_output) $('outHint').textContent = '成片: ' + data.last_output;
+  if (data.busy) setTimeout(pollLogs, 1000);
+  else refresh();
+}
+
+async function runReplicate() {
+  const video = $('repVideo').value.trim();
+  if (!video) return alert('请先填写视频路径');
+  const btn = $('repBtn');
+  btn.disabled = true;
+  $('repHint').textContent = '分析中…（抽帧 + 视觉模型生成，通常需要数十秒）';
+  try {
+    const res = await api('/api/replicate/run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ video, frames: +$('repFrames').value || 8, template: $('repTemplate').value })
+    });
+    const view = $('repFramesView');
+    view.innerHTML = '';
+    const t = Date.now();
+    for (let i = 0; i < res.frames; i++) {
+      const img = document.createElement('img');
+      img.src = '/api/replicate/frame?i=' + i + '&t=' + t;
+      view.appendChild(img);
+    }
+    $('repPrompt').value = res.prompt || '';
+    $('repPromptZh').value = res.prompt_zh || '';
+    $('repAnalysis').value = res.analysis || '';
+    $('repHint').textContent = `完成 · ${res.frames} 张关键帧 · 已保存到 ${res.output_dir}`;
+  } catch (e) {
+    $('repHint').textContent = '失败';
+    alert(e.message || e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function openReplicateOut() {
+  try { await api('/api/replicate/open', { method:'POST' }); } catch (e) { alert(e.message || e); }
+}
+
+function clearReplicate() {
+  $('repVideo').value = '';
+  $('repFramesView').innerHTML = '';
+  ['repPrompt', 'repPromptZh', 'repAnalysis'].forEach(id => $(id).value = '');
+}
+
+async function copyReplicate(id) {
+  const text = $(id).value.trim();
+  if (!text) return alert(id === 'repPromptZh' ? '未解析到中文提示词' : '暂无提示词');
+  try { await navigator.clipboard.writeText(text); alert('已复制'); }
+  catch { $(id).style.display = ''; $(id).select(); document.execCommand('copy'); alert('已复制'); }
+}
+
+refresh().then(refreshList).catch(e => alert(e.message||e));
+</script>
+</body>
+</html>

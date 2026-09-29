@@ -1,0 +1,8 @@
+/bin/
+/dist/
+/tools/
+/backup_replicate/
+*.rar
+*.exe
+.env
+config.yaml
