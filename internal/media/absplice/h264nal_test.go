@@ -112,3 +112,115 @@ func TestFindNALByType(t *testing.T) {
 		t.Error("should not find non-existent NAL")
 	}
 }
+
+func TestPatchBits(t *testing.T) {
+	data := []byte{0x00, 0x00}
+	// Write 0xA (1010) at bit pos 4, width 4 → first byte becomes 0x0A
+	if err := patchBits(data, 4, 4, 0xA); err != nil {
+		t.Fatal(err)
+	}
+	if data[0] != 0x0A {
+		t.Fatalf("expected 0x0A, got 0x%02X", data[0])
+	}
+	// Write 0x3 (11) at bit pos 12, width 2 → byte1 bitIdx 4..5 → 0x0C
+	if err := patchBits(data, 12, 2, 0x3); err != nil {
+		t.Fatal(err)
+	}
+	if data[1] != 0x0C {
+		t.Fatalf("expected 0x0C, got 0x%02X", data[1])
+	}
+}
+
+func TestRewriteSliceHeaderIdentityPreservesPayload(t *testing.T) {
+	// Synthetic non-IDR slice RBSP:
+	// first_mb=0 (1), slice_type=5 (00101 → 5 bits as ue), pps=0 (1), frame_num=1 (4 bits) = 11 bits,
+	// then 5 leftover bits in first two bytes + trailing payload that must stay bit-aligned.
+	sps := &SPSParams{
+		Log2MaxFrameNumMinus4:       0, // 4-bit frame_num
+		PicOrderCntType:             2, // no POC field
+		FrameMBSOnlyFlag:            true,
+		Log2MaxPicOrderCntLsbMinus4: 0,
+	}
+	bw := NewBitWriter()
+	bw.WriteUEG(0)      // first_mb
+	bw.WriteUEG(5)      // slice_type P
+	bw.WriteUEG(0)      // pps_id
+	bw.WriteBits(1, 4)  // frame_num
+	// rest: deliberately mid-byte (header ends at bit 11 → rem=3)
+	bw.WriteBits(0x1D, 5) // 5 remaining bits of current conceptual byte + start of body
+	bw.WriteBytes([]byte{0xAB, 0xCD, 0xEF, 0x01})
+	rbsp := bw.Bytes()
+	ebsp := RBSPtoEBSP(rbsp)
+	nal := &NALUnit{
+		Type:       NALTypeNonIDR,
+		HeaderByte: 0x41,
+		Payload:    ebsp,
+	}
+	sh, err := ParseSliceHeader(nal, sps)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if sh.FrameNum != 1 {
+		t.Fatalf("frame_num=%d", sh.FrameNum)
+	}
+	if sh.HeaderBitsLen%8 == 0 || sh.HeaderBitsLen%8 == 4 {
+		t.Fatalf("test fixture should hit non-trivial rem, got rem=%d bits=%d", sh.HeaderBitsLen%8, sh.HeaderBitsLen)
+	}
+
+	same, err := RewriteSliceHeaderForRef(nal, sps, sh.FrameNum, sh.PicOrderCntLsb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(same.Payload, nal.Payload) {
+		t.Fatalf("identity rewrite must preserve payload\norig=%x\nnew =%x", nal.Payload, same.Payload)
+	}
+
+	changed, err := RewriteSliceHeaderForRef(nal, sps, 7, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh2, err := ParseSliceHeader(changed, sps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sh2.FrameNum != 7 {
+		t.Fatalf("expected frame_num=7, got %d", sh2.FrameNum)
+	}
+	// Body after header bits must match original (compare RBSP tails).
+	origRBSP := EBSPtoRBSP(nal.Payload)
+	newRBSP := EBSPtoRBSP(changed.Payload)
+	bitStart := sh.HeaderBitsLen
+	if !rbspBitsEqual(origRBSP, newRBSP, bitStart) {
+		t.Fatalf("slice body bits after header diverged (bitstream misalignment)")
+	}
+}
+
+func rbspBitsEqual(a, b []byte, fromBit int) bool {
+	if len(a)*8 < fromBit || len(b)*8 < fromBit {
+		return false
+	}
+	maxBits := len(a) * 8
+	if len(b)*8 < maxBits {
+		maxBits = len(b) * 8
+	}
+	for i := fromBit; i < maxBits; i++ {
+		ba := (a[i/8] >> (7 - (i % 8))) & 1
+		bb := (b[i/8] >> (7 - (i % 8))) & 1
+		if ba != bb {
+			return false
+		}
+	}
+	return true
+}
+
+func TestBitWriterBitsWrittenAligned(t *testing.T) {
+	bw := NewBitWriter()
+	bw.WriteBits(0xFF, 8)
+	if bw.BitsWritten() != 8 {
+		t.Fatalf("BitsWritten after 8 bits: got %d", bw.BitsWritten())
+	}
+	bw.WriteBits(0x1, 1)
+	if bw.BitsWritten() != 9 {
+		t.Fatalf("BitsWritten after 9 bits: got %d", bw.BitsWritten())
+	}
+}

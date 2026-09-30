@@ -66,6 +66,61 @@ func pickAudioFiles() ([]string, error) {
 	return []string{path}, nil
 }
 
+func pickImageFile() (string, error) {
+	path, err := dialog.File().
+		Title("选择图片（A 画面）").
+		Filter("图片文件", "jpg", "jpeg", "png", "bmp", "webp", "tiff").
+		Filter("所有文件", "*").
+		Load()
+	if isPickerCanceled(err) {
+		return "", nil
+	}
+	return strings.TrimSpace(path), err
+}
+
+func pickAMediaFile() (string, error) {
+	path, err := dialog.File().
+		Title("选择 A 素材（图片或视频）").
+		Filter("图片/视频", "jpg", "jpeg", "png", "bmp", "webp", "tiff", "mp4", "mov", "mkv", "avi", "m4v", "webm", "ts").
+		Filter("所有文件", "*").
+		Load()
+	if isPickerCanceled(err) {
+		return "", nil
+	}
+	return strings.TrimSpace(path), err
+}
+
+func pickOneVideoFile() (string, error) {
+	vs, err := pickVideoFiles()
+	if err != nil {
+		return "", err
+	}
+	if len(vs) == 0 {
+		return "", nil
+	}
+	return vs[0], nil
+}
+
+func pickSaveFile(title string, defaultName string, ext string) (string, error) {
+	filterName := "MP4 视频"
+	if ext == "" {
+		ext = "mp4"
+	}
+	if ext == "h264" || ext == "264" {
+		filterName = "H.264 裸流"
+	}
+	b := dialog.File().Title(title)
+	if defaultName != "" {
+		b = b.SetFileName(defaultName)
+	}
+	b = b.Filter(filterName, ext).Filter("所有文件", "*")
+	path, err := b.Save()
+	if isPickerCanceled(err) {
+		return "", nil
+	}
+	return strings.TrimSpace(path), err
+}
+
 func pickDirectory(title string) (string, error) {
 	if title == "" {
 		title = "选择文件夹"

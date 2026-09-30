@@ -84,6 +84,7 @@ func Run() {
 	settingsPage := newSettingsPage(state)
 	originalPage := newOriginalPage(state)
 	replicatePage := newReplicatePage(state)
+	abSplicePage := newABSplicePage(state)
 
 	state.onRefreshProject = refreshProject
 	state.onRefreshAssets = refreshAssets
@@ -151,6 +152,7 @@ func Run() {
 		container.NewTabItem("设置", settingsPage),
 		container.NewTabItem("一键原创", originalPage),
 		container.NewTabItem("爆款复刻", replicatePage),
+		container.NewTabItem("AB 拼接", abSplicePage),
 		container.NewTabItem("手法图鉴", atlasPage),
 	)
 	mainTabs.SetTabLocation(container.TabLocationTop)

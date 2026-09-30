@@ -1,45 +1,72 @@
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-if (-not (Test-Path "dist")) {
-    New-Item -ItemType Directory -Path "dist" | Out-Null
+Write-Host "ROOT=$Root"
+
+if (-not (Test-Path (Join-Path $Root 'dist'))) {
+    New-Item -ItemType Directory -Path (Join-Path $Root 'dist') | Out-Null
 }
 
-# Prefer portable toolchain under tools/w64devkit (no system install required).
-$w64Bin = Join-Path $Root "tools\w64devkit\bin"
-if (Test-Path (Join-Path $w64Bin "gcc.exe")) {
-    $env:Path = "$w64Bin;$env:Path"
+$w64Bin = Join-Path $Root 'tools\w64devkit\bin'
+$gccPath = $null
+
+$gccInPath = Get-Command gcc -ErrorAction SilentlyContinue
+if ($gccInPath) {
+    $gccPath = $gccInPath.Source
+    Write-Host "Using system gcc: $gccPath"
+} elseif (Test-Path (Join-Path $w64Bin 'gcc.exe')) {
     Write-Host "Using portable gcc: $w64Bin"
+    $env:PATH = "$w64Bin;$env:PATH"
+    $gccPath = Join-Path $w64Bin 'gcc.exe'
 }
 
-$gcc = Get-Command gcc -ErrorAction SilentlyContinue
-if (-not $gcc) {
-    Write-Host "ERROR: gcc not found. Extract tools/w64devkit first (see README)."
+if (-not $gccPath) {
+    Write-Host "ERROR: gcc not found. Extract tools\w64devkit first (see README)." -ForegroundColor Red
     exit 1
 }
 
-Write-Host "gcc: $($gcc.Source)"
-$env:CGO_ENABLED = "1"
-
-Write-Host "Building native Fyne GUI -> dist/narrato.exe ..."
-go build -tags fyne_gui -ldflags "-H windowsgui -s -w" -o dist/narrato.exe ./cmd/narrato
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-Write-Host "Building CLI helper -> dist/narrato-cli.exe ..."
-$env:CGO_ENABLED = "0"
-go build -ldflags "-s -w" -o dist/narrato-cli.exe ./cmd/narrato
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-# Browser UI fallback (no CGO) for machines without gcc
-Write-Host "Building browser-UI fallback -> dist/narrato-web.exe ..."
-go build -ldflags "-H windowsgui -s -w" -o dist/narrato-web.exe ./cmd/narrato
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Write-Host "gcc: $gccPath"
+$env:CGO_ENABLED = '1'
+$env:GOOS      = 'windows'
+$env:GOARCH    = 'amd64'
 
 Write-Host ""
-Write-Host "Build complete:"
-Write-Host "  dist/narrato.exe     (native Fyne window)"
-Write-Host "  dist/narrato-cli.exe (console)"
-Write-Host "  dist/narrato-web.exe (browser UI fallback)"
-Write-Host "Reminder: copy ffmpeg.exe and ffprobe.exe into dist/ before distributing."
+Write-Host "[1/3] Building native Fyne GUI -> dist\narrato.exe (with AB Splice Tab)" -ForegroundColor Cyan
+go build -tags fyne_gui -ldflags "-H windowsgui -s -w" -o (Join-Path $Root 'dist\narrato.exe') (Join-Path $Root '.\cmd\narrato')
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[FAIL] GUI build failed, exit=$LASTEXITCODE" -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+Write-Host "   OK" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "[2/3] Building CLI helper -> dist\narrato-cli.exe" -ForegroundColor Cyan
+$env:CGO_ENABLED = '0'
+go build -ldflags "-s -w" -o (Join-Path $Root 'dist\narrato-cli.exe') (Join-Path $Root '.\cmd\narrato')
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[FAIL] CLI build failed, exit=$LASTEXITCODE" -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+Write-Host "   OK" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "[3/3] Building browser-UI fallback -> dist\narrato-web.exe" -ForegroundColor Cyan
+go build -ldflags "-H windowsgui -s -w" -o (Join-Path $Root 'dist\narrato-web.exe') (Join-Path $Root '.\cmd\narrato')
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[FAIL] Web build failed, exit=$LASTEXITCODE" -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+Write-Host "   OK" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "============================================================"
+Write-Host "  Build complete:" -ForegroundColor Green
+Write-Host "    dist\narrato.exe     (native Fyne window + AB Splice Tab)"
+Write-Host "    dist\narrato-cli.exe (console)"
+Write-Host "    dist\narrato-web.exe (browser UI fallback)"
+Write-Host "============================================================"
+Write-Host "  Reminder: copy ffmpeg.exe and ffprobe.exe into dist\"
+Write-Host "            before distributing."
+Write-Host "============================================================"

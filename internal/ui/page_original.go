@@ -497,10 +497,11 @@ func newOriginalPage(state *AppState) fyne.CanvasObject {
 	)
 
 	toolbar := container.NewHBox(pickVideoBtn, previewBtn, startBtn, cancelBtn, openOutBtn)
-	mediaRow := container.NewBorder(nil, nil,
-		container.NewHBox(pickSrtBtn, clearSrtBtn, srtLabel),
-		nil,
-		container.NewHBox(pickBgmBtn, clearBgmBtn, bgmLabel, widget.NewLabel("水印"), wmText, cornerSelect),
+	// 三列均分，避免字幕/BGM/水印控件挤成一团
+	mediaRow := container.NewGridWithColumns(3,
+		container.NewBorder(nil, nil, container.NewHBox(pickSrtBtn, clearSrtBtn), nil, srtLabel),
+		container.NewBorder(nil, nil, container.NewHBox(pickBgmBtn, clearBgmBtn), nil, bgmLabel),
+		container.NewBorder(nil, nil, widget.NewLabel("水印"), cornerSelect, wmText),
 	)
 
 	body := container.NewVBox(

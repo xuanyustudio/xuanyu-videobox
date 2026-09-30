@@ -134,6 +134,20 @@ func FilterNALByTypes(nals []NALUnit, types ...int) []NALUnit {
 	return out
 }
 
+func skipScalingList(br *BitReader, sizeOfScalingList int) {
+	lastScale := 8
+	nextScale := 8
+	for j := 0; j < sizeOfScalingList; j++ {
+		if nextScale != 0 {
+			deltaScale := int(br.ReadSEG())
+			nextScale = (lastScale + deltaScale + 256) % 256
+		}
+		if nextScale != 0 {
+			lastScale = nextScale
+		}
+	}
+}
+
 func ParseSPS(nal *NALUnit) (*SPSParams, error) {
 	if nal.Type != NALTypeSPS {
 		return nil, fmt.Errorf("not SPS NAL, type=%d", nal.Type)
@@ -144,9 +158,9 @@ func ParseSPS(nal *NALUnit) (*SPSParams, error) {
 	}
 	br := NewBitReader(rbsp)
 	profileIDC := int(br.ReadBits(8))
-	br.ReadBits(8)
+	br.ReadBits(8) // constraint flags + reserved
 	levelIDC := int(br.ReadBits(8))
-	_ = br.ReadUEG()
+	_ = br.ReadUEG() // seq_parameter_set_id
 	sps := &SPSParams{
 		ProfileIDC: profileIDC,
 		LevelIDC:   levelIDC,
@@ -159,13 +173,25 @@ func ParseSPS(nal *NALUnit) (*SPSParams, error) {
 		profileIDC == 135 {
 		chromaFormatIDC = br.ReadUEG()
 		if chromaFormatIDC == 3 {
-			br.ReadBits(1)
+			br.ReadBits(1) // separate_colour_plane_flag
 		}
-		_ = br.ReadUEG()
-		_ = br.ReadUEG()
-		br.ReadBits(1)
-		if br.ReadBits(1) == 1 {
-			sps.DeltaPicOrderAlwaysZeroFlag = true
+		_ = br.ReadUEG() // bit_depth_luma_minus8
+		_ = br.ReadUEG() // bit_depth_chroma_minus8
+		br.ReadBits(1)   // qpprime_y_zero_transform_bypass_flag
+		if br.ReadBits(1) == 1 { // seq_scaling_matrix_present_flag
+			nLists := 8
+			if chromaFormatIDC == 3 {
+				nLists = 12
+			}
+			for i := 0; i < nLists; i++ {
+				if br.ReadBits(1) == 1 {
+					if i < 6 {
+						skipScalingList(br, 16)
+					} else {
+						skipScalingList(br, 64)
+					}
+				}
+			}
 		}
 	}
 	sps.Log2MaxFrameNumMinus4 = int(br.ReadUEG())
@@ -176,23 +202,23 @@ func ParseSPS(nal *NALUnit) (*SPSParams, error) {
 		if br.ReadBits(1) == 1 {
 			sps.DeltaPicOrderAlwaysZeroFlag = true
 		}
-		_ = int(br.ReadSEG())
-		_ = int32(br.ReadSEG())
+		_ = int(br.ReadSEG())  // offset_for_non_ref_pic
+		_ = int32(br.ReadSEG()) // offset_for_top_to_bottom_field
 		numRefFramesInPicOrderCntCycle := br.ReadUEG()
 		for i := uint32(0); i < numRefFramesInPicOrderCntCycle; i++ {
 			_ = int32(br.ReadSEG())
 		}
 	}
 	sps.NumRefFrames = int(br.ReadUEG())
-	br.ReadBits(1)
+	br.ReadBits(1) // gaps_in_frame_num_value_allowed_flag
 	widthInMBSMinus1 := br.ReadUEG()
 	heightInMapUnitsMinus1 := br.ReadUEG()
 	frameMBSOnlyFlag := br.ReadBits(1)
 	sps.FrameMBSOnlyFlag = frameMBSOnlyFlag == 1
 	if !sps.FrameMBSOnlyFlag {
-		br.ReadBits(1)
+		br.ReadBits(1) // mb_adaptive_frame_field_flag
 	}
-	br.ReadBits(1)
+	br.ReadBits(1) // direct_8x8_inference_flag
 	sps.Width = int((widthInMBSMinus1 + 1) * 16)
 	sps.Height = int((heightInMapUnitsMinus1 + 1) * 16)
 	if !sps.FrameMBSOnlyFlag {
@@ -201,9 +227,28 @@ func ParseSPS(nal *NALUnit) (*SPSParams, error) {
 	return sps, nil
 }
 
+// MaxFrameNum returns 1 << (log2_max_frame_num_minus4 + 4).
+func (s *SPSParams) MaxFrameNum() uint32 {
+	if s == nil {
+		return 16
+	}
+	return uint32(1) << uint(s.Log2MaxFrameNumMinus4+4)
+}
+
+// MaxPicOrderCntLsb returns 1 << (log2_max_pic_order_cnt_lsb_minus4 + 4).
+func (s *SPSParams) MaxPicOrderCntLsb() uint32 {
+	if s == nil || s.PicOrderCntType != 0 {
+		return 256
+	}
+	return uint32(1) << uint(s.Log2MaxPicOrderCntLsbMinus4+4)
+}
+
 func ParseSliceHeader(nal *NALUnit, sps *SPSParams) (*SliceHeader, error) {
 	if !nal.IsVCL() {
 		return nil, fmt.Errorf("not VCL NAL, type=%d", nal.Type)
+	}
+	if sps == nil {
+		return nil, errors.New("SPS required")
 	}
 	rbsp := EBSPtoRBSP(nal.Payload)
 	br := NewBitReader(rbsp)
@@ -216,7 +261,10 @@ func ParseSliceHeader(nal *NALUnit, sps *SPSParams) (*SliceHeader, error) {
 	frameNumBits := uint(sps.Log2MaxFrameNumMinus4 + 4)
 	sh.FrameNum = br.ReadBits(frameNumBits)
 	if !sps.FrameMBSOnlyFlag {
-		br.ReadBits(1)
+		fieldPicFlag := br.ReadBits(1)
+		if fieldPicFlag != 0 {
+			br.ReadBits(1) // bottom_field_flag
+		}
 	}
 	if sh.IsIDR {
 		sh.IDRPicID = br.ReadUEG()
@@ -224,14 +272,11 @@ func ParseSliceHeader(nal *NALUnit, sps *SPSParams) (*SliceHeader, error) {
 	if sps.PicOrderCntType == 0 {
 		pocBits := uint(sps.Log2MaxPicOrderCntLsbMinus4 + 4)
 		sh.PicOrderCntLsb = br.ReadBits(pocBits)
-		if !sps.DeltaPicOrderAlwaysZeroFlag {
-			sh.DeltaPicOrderCntBottom = int32(br.ReadSEG())
-		}
+		// delta_pic_order_cnt_bottom depends on PPS flag; leave unread here.
 	} else if sps.PicOrderCntType == 1 && !sps.DeltaPicOrderAlwaysZeroFlag {
 		sh.DeltaPicOrderCnt[0] = int32(br.ReadSEG())
-		sh.DeltaPicOrderCnt[1] = int32(br.ReadSEG())
+		// delta_pic_order_cnt[1] depends on PPS; leave unread here.
 	}
-	sh.RedundantPicCnt = br.ReadUEG()
 	sh.HeaderBitsLen = br.BitsRead()
 	endBytes := (sh.HeaderBitsLen + 7) / 8
 	if endBytes > len(rbsp) {
@@ -242,122 +287,100 @@ func ParseSliceHeader(nal *NALUnit, sps *SPSParams) (*SliceHeader, error) {
 	return sh, nil
 }
 
+// patchBits overwrites nBits at bitPos (MSB-first within each byte) in data.
+func patchBits(data []byte, bitPos int, nBits uint, val uint32) error {
+	if nBits == 0 {
+		return nil
+	}
+	end := bitPos + int(nBits)
+	if end > len(data)*8 {
+		return fmt.Errorf("patchBits: out of range bitPos=%d nBits=%d len=%d", bitPos, nBits, len(data))
+	}
+	for i := uint(0); i < nBits; i++ {
+		bit := byte((val >> (nBits - 1 - i)) & 1)
+		idx := bitPos + int(i)
+		byteIdx := idx / 8
+		bitIdx := idx % 8
+		mask := byte(1 << (7 - bitIdx))
+		if bit == 1 {
+			data[byteIdx] |= mask
+		} else {
+			data[byteIdx] &^= mask
+		}
+	}
+	return nil
+}
+
+// RewriteSliceHeaderForRef patches frame_num and (when POC type 0) pic_order_cnt_lsb
+// in-place. The rest of the slice RBSP is left untouched so CABAC/CAVLC data stays aligned.
 func RewriteSliceHeaderForRef(nal *NALUnit, sps *SPSParams, newFrameNum uint32, newPOCLsb uint32) (*NALUnit, error) {
 	if !nal.IsVCL() {
 		return nil, fmt.Errorf("not VCL NAL")
 	}
-	if nal.Type == NALTypeIDR {
-		return nal, nil
+	if sps == nil {
+		return nil, errors.New("SPS required")
 	}
+	if nal.Type == NALTypeIDR {
+		cp := *nal
+		return &cp, nil
+	}
+
 	rbsp := EBSPtoRBSP(nal.Payload)
 	br := NewBitReader(rbsp)
-	firstMBInSlice := br.ReadUEG()
-	sliceType := br.ReadUEG()
-	picParamSetID := br.ReadUEG()
+	_ = br.ReadUEG() // first_mb_in_slice
+	_ = br.ReadUEG() // slice_type
+	_ = br.ReadUEG() // pic_parameter_set_id
+
 	frameNumBits := uint(sps.Log2MaxFrameNumMinus4 + 4)
-	oldFrameNum := br.ReadBits(frameNumBits)
-	_ = oldFrameNum
-	var fieldPicFlag byte = 0
+	frameNumBitPos := br.BitsRead()
+	_ = br.ReadBits(frameNumBits)
+
 	if !sps.FrameMBSOnlyFlag {
-		fieldPicFlag = byte(br.ReadBits(1))
+		fieldPicFlag := br.ReadBits(1)
+		if fieldPicFlag != 0 {
+			br.ReadBits(1) // bottom_field_flag
+		}
 	}
-	var bottomFieldFlag byte = 0
-	if fieldPicFlag != 0 {
-		bottomFieldFlag = byte(br.ReadBits(1))
-	}
-	var idrPicID uint32 = 0
-	if nal.Type == NALTypeIDR {
-		idrPicID = br.ReadUEG()
-	}
-	_ = idrPicID
-	_ = bottomFieldFlag
-	var oldPOCLsb uint32
-	var deltaPicOrderCntBottom int32 = 0
-	var deltaPicOrderCnt0, deltaPicOrderCnt1 int32 = 0, 0
+
+	pocBitPos := -1
+	var pocBits uint
 	if sps.PicOrderCntType == 0 {
-		pocBits := uint(sps.Log2MaxPicOrderCntLsbMinus4 + 4)
-		oldPOCLsb = br.ReadBits(pocBits)
-		_ = oldPOCLsb
-		if !sps.DeltaPicOrderAlwaysZeroFlag {
-			deltaPicOrderCntBottom = int32(br.ReadSEG())
+		pocBits = uint(sps.Log2MaxPicOrderCntLsbMinus4 + 4)
+		pocBitPos = br.BitsRead()
+		_ = br.ReadBits(pocBits)
+	}
+
+	maxFN := sps.MaxFrameNum()
+	if maxFN > 0 {
+		newFrameNum = newFrameNum % maxFN
+	}
+	if err := patchBits(rbsp, frameNumBitPos, frameNumBits, newFrameNum); err != nil {
+		return nil, err
+	}
+	if pocBitPos >= 0 {
+		maxPOC := sps.MaxPicOrderCntLsb()
+		if maxPOC > 0 {
+			newPOCLsb = newPOCLsb % maxPOC
 		}
-	} else if sps.PicOrderCntType == 1 && !sps.DeltaPicOrderAlwaysZeroFlag {
-		deltaPicOrderCnt0 = int32(br.ReadSEG())
-		deltaPicOrderCnt1 = int32(br.ReadSEG())
-	}
-	redundantPicCnt := br.ReadUEG()
-	headerLenBeforeRest := br.BitsRead()
-	restBitsStart := headerLenBeforeRest % 8
-	restByteIdx := headerLenBeforeRest / 8
-	var tail []byte
-	var tailBits byte
-	if restByteIdx < len(rbsp) {
-		tail = make([]byte, len(rbsp)-int(restByteIdx))
-		copy(tail, rbsp[restByteIdx:])
-		tailBits = byte(restBitsStart)
-	}
-	bw := NewBitWriter()
-	bw.WriteUEG(firstMBInSlice)
-	bw.WriteUEG(sliceType)
-	bw.WriteUEG(picParamSetID)
-	bw.WriteBits(newFrameNum, frameNumBits)
-	if !sps.FrameMBSOnlyFlag {
-		bw.WriteBits(uint32(fieldPicFlag), 1)
-	}
-	if fieldPicFlag != 0 {
-		bw.WriteBits(uint32(bottomFieldFlag), 1)
-	}
-	if nal.Type == NALTypeIDR {
-		bw.WriteUEG(idrPicID)
-	}
-	if sps.PicOrderCntType == 0 {
-		pocBits := uint(sps.Log2MaxPicOrderCntLsbMinus4 + 4)
-		bw.WriteBits(newPOCLsb, pocBits)
-		if !sps.DeltaPicOrderAlwaysZeroFlag {
-			bw.WriteSEG(deltaPicOrderCntBottom)
-		}
-	} else if sps.PicOrderCntType == 1 && !sps.DeltaPicOrderAlwaysZeroFlag {
-		bw.WriteSEG(deltaPicOrderCnt0)
-		bw.WriteSEG(deltaPicOrderCnt1)
-	}
-	bw.WriteUEG(redundantPicCnt)
-	if len(tail) > 0 && tailBits > 0 {
-		mask := byte(0xFF) >> (8 - tailBits)
-		firstByte := tail[0] & mask
-		bw.WriteBits(uint32(firstByte), uint(tailBits))
-		if len(tail) > 1 {
-			bw.WriteBytes(tail[1:])
-		}
-	} else if len(tail) > 0 {
-		bw.WriteBytes(tail)
-	}
-	newRBSP := bw.Bytes()
-	if len(newRBSP) > 0 && newRBSP[len(newRBSP)-1] == 0x00 {
-		newRBSP = append(newRBSP, 0x80)
-	} else if len(newRBSP) > 0 {
-		lastBits := bw.BitsWritten() % 8
-		if lastBits != 0 {
-			newRBSP[len(newRBSP)-1] |= 0x80 >> lastBits
+		if err := patchBits(rbsp, pocBitPos, pocBits, newPOCLsb); err != nil {
+			return nil, err
 		}
 	}
-	newEBSP := RBSPtoEBSP(newRBSP)
-	newPayload := make([]byte, 1+len(newEBSP))
-	newPayload[0] = nal.HeaderByte
-	copy(newPayload[1:], newEBSP)
+
+	newEBSP := RBSPtoEBSP(rbsp)
 	startCode := []byte{0x00, 0x00, 0x00, 0x01}
-	newRaw := make([]byte, len(startCode)+len(newPayload))
+	newRaw := make([]byte, len(startCode)+1+len(newEBSP))
 	copy(newRaw, startCode)
-	copy(newRaw[len(startCode):], newPayload)
-	newNAL := &NALUnit{
+	newRaw[len(startCode)] = nal.HeaderByte
+	copy(newRaw[len(startCode)+1:], newEBSP)
+	return &NALUnit{
 		StartCodeLen: 4,
 		Type:         nal.Type,
 		RefIDC:       nal.RefIDC,
 		HeaderByte:   nal.HeaderByte,
 		Payload:      newEBSP,
 		Raw:          newRaw,
-	}
-	_ = oldPOCLsb
-	return newNAL, nil
+	}, nil
 }
 
 func EBSPtoRBSP(ebsp []byte) []byte {

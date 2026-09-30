@@ -170,5 +170,11 @@ func (bw *BitWriter) Bytes() []byte {
 }
 
 func (bw *BitWriter) BitsWritten() int {
+	if len(bw.data) == 0 {
+		return 0
+	}
+	if bw.bitPos == 0 {
+		return len(bw.data) * 8
+	}
 	return (len(bw.data)-1)*8 + bw.bitPos
 }
