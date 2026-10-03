@@ -50,6 +50,7 @@
   <button data-tab="render">合成</button>
   <button data-tab="settings">设置</button>
   <button data-tab="replicate">爆款复刻</button>
+  <button data-tab="linkdl">链接下载</button>
 </nav>
 <main>
   <section id="project" class="active">
@@ -159,6 +160,21 @@
     <textarea id="repAnalysis" readonly placeholder="提取出的提示词分析将显示在这里..."></textarea>
   </section>
 
+  <section id="linkdl">
+    <p class="hint">粘贴视频分享链接 → 解析 → 下载无水印视频<br/>支持：抖音、快手、西瓜视频、微博、皮皮虾、好看视频、皮皮搞笑、梨视频</p>
+    <label>视频链接（每行一个，支持分享文本）</label>
+    <textarea id="linkdlUrls" placeholder="https://v.douyin.com/xxxxx/&#10;https://www.douyin.com/video/123456"></textarea>
+    <label>保存目录（留空使用工程根目录）</label>
+    <input id="linkdlOutDir"/>
+    <div class="actions">
+      <button class="primary" id="linkdlBtn" onclick="runLinkDL()">解析并下载</button>
+      <button class="ghost" onclick="$('linkdlUrls').value='';$('linkdlLog').textContent='';$('linkdlHint').textContent='';">清空</button>
+    </div>
+    <p class="hint" id="linkdlHint"></p>
+    <label>日志</label>
+    <pre class="log" id="linkdlLog"></pre>
+  </section>
+
   <section id="settings">
     <label>LLM Base URL</label>
     <input id="baseUrl"/>
@@ -221,6 +237,7 @@ function fillSettings(cfg, cfgPath, root) {
   $('repModel').value = cfg.replicate?.model || '';
   $('cfgPath').textContent = '配置文件: ' + cfgPath;
   $('projRoot').textContent = '工程目录: ' + root;
+  if ($('linkdlOutDir') && !$('linkdlOutDir').value) $('linkdlOutDir').value = root || '';
 }
 
 function fillProject(p) {
@@ -408,6 +425,40 @@ async function copyReplicate(id) {
   if (!text) return alert(id === 'repPromptZh' ? '未解析到中文提示词' : '暂无提示词');
   try { await navigator.clipboard.writeText(text); alert('已复制'); }
   catch { el.select(); document.execCommand('copy'); alert('已复制'); }
+}
+
+async function runLinkDL() {
+  const text = $('linkdlUrls').value.trim();
+  if (!text) return alert('请输入至少一个链接');
+  const urls = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  const btn = $('linkdlBtn');
+  btn.disabled = true;
+  $('linkdlHint').textContent = '解析下载中…';
+  $('linkdlLog').textContent = '';
+  try {
+    const res = await api('/api/linkdl/run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ urls, out_dir: $('linkdlOutDir').value.trim() })
+    });
+    const results = res.results || [];
+    let log = '';
+    let ok = 0;
+    for (const r of results) {
+      if (r.file_path) {
+        log += `✓ [${r.platform}] ${r.title} → ${r.file_path}\n`;
+        ok++;
+      } else {
+        log += `✗ ${r.url}: ${r.error}\n`;
+      }
+    }
+    $('linkdlLog').textContent = log;
+    $('linkdlHint').textContent = `完成: ${ok}/${results.length} 成功`;
+  } catch (e) {
+    $('linkdlHint').textContent = '失败';
+    alert(e.message || e);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 refresh().then(refreshList).catch(e => alert(e.message||e));

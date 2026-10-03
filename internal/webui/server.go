@@ -39,6 +39,8 @@ type server struct {
 
 	replicating   bool
 	replicateLast *replicate.Result
+
+	linkDLBusy bool
 }
 
 // DefaultConfigPath prefers config.yaml beside the executable.
@@ -87,6 +89,7 @@ func Run() {
 	mux.HandleFunc("/api/replicate/run", s.handleReplicateRun)
 	mux.HandleFunc("/api/replicate/frame", s.handleReplicateFrame)
 	mux.HandleFunc("/api/replicate/open", s.handleReplicateOpen)
+	mux.HandleFunc("/api/linkdl/run", s.handleLinkDLRun)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
