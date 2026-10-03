@@ -85,6 +85,7 @@ func Run() {
 	originalPage := newOriginalPage(state)
 	replicatePage := newReplicatePage(state)
 	abSplicePage := newABSplicePage(state)
+	linkDLPage := newLinkDownloadPage(state)
 
 	state.onRefreshProject = refreshProject
 	state.onRefreshAssets = refreshAssets
@@ -152,6 +153,7 @@ func Run() {
 		container.NewTabItem("设置", settingsPage),
 		container.NewTabItem("一键原创", originalPage),
 		container.NewTabItem("爆款复刻", replicatePage),
+		container.NewTabItem("链接下载", linkDLPage),
 		container.NewTabItem("AB 拼接", abSplicePage),
 		container.NewTabItem("手法图鉴", atlasPage),
 	)
