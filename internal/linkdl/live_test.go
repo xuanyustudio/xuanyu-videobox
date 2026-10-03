@@ -26,18 +26,14 @@ func TestDouyinLiveDownload(t *testing.T) {
 		t.Run(fmt.Sprintf("URL_%d", i+1), func(t *testing.T) {
 			info, err := DetectAndParse(ctx, rawURL)
 			if err != nil {
-				t.Logf("PARSE ERROR: %v", err)
-				t.Logf("This may be expected if Douyin blocks cloud VMs (captcha/empty response)")
-				return
+				t.Fatalf("PARSE ERROR: %v", err)
 			}
 			t.Logf("Platform: %s", info.Platform)
 			t.Logf("Title: %s", info.Title)
-			t.Logf("Author: %s", info.Author)
 			t.Logf("VideoURL: %s", info.VideoURL)
 
 			if info.VideoURL == "" {
-				t.Log("NO VIDEO URL (gallery or blocked)")
-				return
+				t.Fatal("NO VIDEO URL returned")
 			}
 
 			path, err := Download(ctx, info, outDir, func(p Progress) {
@@ -46,8 +42,7 @@ func TestDouyinLiveDownload(t *testing.T) {
 				}
 			})
 			if err != nil {
-				t.Logf("DOWNLOAD ERROR: %v", err)
-				return
+				t.Fatalf("DOWNLOAD ERROR: %v", err)
 			}
 			fi, _ := os.Stat(path)
 			t.Logf("SUCCESS: %s (%d bytes, %.2f MB)", path, fi.Size(), float64(fi.Size())/1024/1024)

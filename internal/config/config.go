@@ -17,6 +17,7 @@ type Config struct {
 	Paths  Paths  `yaml:"paths"`
 
 	Replicate Replicate `yaml:"replicate" json:"replicate"`
+	Douyin    Douyin    `yaml:"douyin" json:"douyin"`
 }
 
 type LLM struct {
@@ -59,6 +60,12 @@ type Replicate struct {
 	Frames  int    `yaml:"frames" json:"frames"` // keyframes sampled per video
 }
 
+// Douyin holds the self-hosted Douyin_TikTok_Download_API connection info.
+type Douyin struct {
+	BaseURL string `yaml:"base_url" json:"base_url"`
+	APIKey  string `yaml:"api_key" json:"api_key"`
+}
+
 type Paths struct {
 	ProjectsRoot string `yaml:"projects_root"`
 }
@@ -89,6 +96,10 @@ func Default() *Config {
 			BaseURL: "https://api-inference.modelscope.cn/v1",
 			Model:   "Qwen/Qwen3-VL-8B-Instruct",
 			Frames:  8,
+		},
+		Douyin: Douyin{
+			BaseURL: "http://39.109.101.66:8000",
+			APIKey:  "dtk_0ebb3c9076ad_NVJtZ8xXbGvYWPi1GCkOuFx5hjGwFgZV",
 		},
 	}
 }

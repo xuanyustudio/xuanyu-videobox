@@ -64,42 +64,37 @@ func TestDouyinParserMatch(t *testing.T) {
 	}
 }
 
-func TestDouyinExtractVideoID(t *testing.T) {
-	p := &douyinParser{}
-	ctx := context.Background()
-
-	tests := []struct {
-		url  string
-		want string
-	}{
-		{"https://www.douyin.com/video/7396822576074460467", "7396822576074460467"},
-		{"https://www.douyin.com/note/7396822576074460467", "7396822576074460467"},
-		{"https://www.douyin.com/user/MS4wLjAB?modal_id=7691653163225993317", "7691653163225993317"},
-		{"https://www.iesdouyin.com/share/video/123456/", "123456"},
+func TestDouyinParseAPI200(t *testing.T) {
+	resp200 := map[string]any{
+		"success": true,
+		"data": map[string]any{
+			"title": "测试抖音视频",
+			"media": map[string]any{
+				"video": map[string]any{
+					"url": "https://example.com/douyin_nowm.mp4",
+				},
+			},
+		},
 	}
-	for _, tt := range tests {
-		got, err := p.extractVideoID(ctx, tt.url)
-		if err != nil {
-			t.Errorf("extractVideoID(%q): %v", tt.url, err)
-			continue
-		}
-		if got != tt.want {
-			t.Errorf("extractVideoID(%q) = %q, want %q", tt.url, got, tt.want)
-		}
-	}
-}
-
-func TestDouyinParseWithFixture(t *testing.T) {
-	routerJSON := makeDouyinRouterData("测试视频标题", "测试作者", "https://example.com/video.mp4", "https://example.com/cover.jpg")
-	html := fmt.Sprintf(`<html><script>window._ROUTER_DATA = %s</script></html>`, routerJSON)
-
+	var gotKey, gotCT string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/share/video/") {
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, html)
+		gotKey = r.Header.Get("X-API-Key")
+		gotCT = r.Header.Get("Content-Type")
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/parse" {
+			http.NotFound(w, r)
 			return
 		}
-		http.NotFound(w, r)
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		if body["url"] == "" {
+			http.Error(w, "missing url", 400)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp200)
 	}))
 	defer srv.Close()
 
@@ -108,18 +103,183 @@ func TestDouyinParseWithFixture(t *testing.T) {
 	defer func() { defaultClient = origClient }()
 
 	p := &douyinParser{}
-	info, err := p.parseWithBase(context.Background(), "12345", srv.URL)
+	info, err := p.parseViaAPI(context.Background(), "https://v.douyin.com/abc123/", srv.URL, "test-key-123")
 	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if info.Title != "测试视频标题" {
-		t.Errorf("Title = %q, want %q", info.Title, "测试视频标题")
-	}
-	if info.Author != "测试作者" {
-		t.Errorf("Author = %q, want %q", info.Author, "测试作者")
+		t.Fatalf("parseViaAPI: %v", err)
 	}
 	if info.Platform != "douyin" {
-		t.Errorf("Platform = %q, want %q", info.Platform, "douyin")
+		t.Errorf("Platform = %q, want douyin", info.Platform)
+	}
+	if info.Title != "测试抖音视频" {
+		t.Errorf("Title = %q, want %q", info.Title, "测试抖音视频")
+	}
+	if info.VideoURL != "https://example.com/douyin_nowm.mp4" {
+		t.Errorf("VideoURL = %q", info.VideoURL)
+	}
+	if gotKey != "test-key-123" {
+		t.Errorf("X-API-Key = %q, want test-key-123", gotKey)
+	}
+	if gotCT != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", gotCT)
+	}
+}
+
+func TestDouyinParseAPI200_NestedResult(t *testing.T) {
+	resp200 := map[string]any{
+		"success": true,
+		"data": map[string]any{
+			"result": map[string]any{
+				"title": "嵌套格式视频",
+				"media": map[string]any{
+					"video": map[string]any{
+						"url": "https://example.com/nested.mp4",
+					},
+				},
+			},
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp200)
+	}))
+	defer srv.Close()
+
+	origClient := defaultClient
+	defaultClient = srv.Client()
+	defer func() { defaultClient = origClient }()
+
+	p := &douyinParser{}
+	info, err := p.parseViaAPI(context.Background(), "https://www.douyin.com/video/123", srv.URL, "k")
+	if err != nil {
+		t.Fatalf("parseViaAPI nested: %v", err)
+	}
+	if info.VideoURL != "https://example.com/nested.mp4" {
+		t.Errorf("VideoURL = %q", info.VideoURL)
+	}
+	if info.Title != "嵌套格式视频" {
+		t.Errorf("Title = %q", info.Title)
+	}
+}
+
+func TestDouyinParseAPI202_Poll(t *testing.T) {
+	taskID := "task-abc-123"
+	pollCount := 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/parse":
+			w.WriteHeader(http.StatusAccepted)
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{"task_id": taskID},
+			})
+
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/tasks/"+taskID:
+			pollCount++
+			if pollCount < 2 {
+				w.WriteHeader(http.StatusAccepted)
+				json.NewEncoder(w).Encode(map[string]any{
+					"data": map[string]any{"state": "running"},
+				})
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"data": map[string]any{
+					"state": "done",
+					"result": map[string]any{
+						"title": "轮询完成视频",
+						"media": map[string]any{
+							"video": map[string]any{
+								"url": "https://example.com/polled.mp4",
+							},
+						},
+					},
+				},
+			})
+
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	origClient := defaultClient
+	defaultClient = srv.Client()
+	defer func() { defaultClient = origClient }()
+
+	p := &douyinParser{}
+	info, err := p.parseViaAPI(context.Background(), "https://www.douyin.com/user/X?modal_id=789", srv.URL, "poll-key")
+	if err != nil {
+		t.Fatalf("parseViaAPI 202 poll: %v", err)
+	}
+	if info.VideoURL != "https://example.com/polled.mp4" {
+		t.Errorf("VideoURL = %q", info.VideoURL)
+	}
+	if info.Title != "轮询完成视频" {
+		t.Errorf("Title = %q", info.Title)
+	}
+	if pollCount < 2 {
+		t.Errorf("expected at least 2 poll rounds, got %d", pollCount)
+	}
+}
+
+func TestDouyinParseAPI_Error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
+				"code":    "INVALID_URL",
+				"message": "无法识别的链接格式",
+			},
+		})
+	}))
+	defer srv.Close()
+
+	origClient := defaultClient
+	defaultClient = srv.Client()
+	defer func() { defaultClient = origClient }()
+
+	p := &douyinParser{}
+	_, err := p.parseViaAPI(context.Background(), "https://douyin.com/bad", srv.URL, "k")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "INVALID_URL") || !strings.Contains(err.Error(), "无法识别的链接格式") {
+		t.Errorf("error should contain code and message, got: %v", err)
+	}
+}
+
+func TestDouyinParseAPI202_TaskFailed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/parse":
+			w.WriteHeader(http.StatusAccepted)
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{"task_id": "fail-task"},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/tasks/fail-task":
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"data":    map[string]any{"state": "failed"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	origClient := defaultClient
+	defaultClient = srv.Client()
+	defer func() { defaultClient = origClient }()
+
+	p := &douyinParser{}
+	_, err := p.parseViaAPI(context.Background(), "https://douyin.com/x", srv.URL, "k")
+	if err == nil {
+		t.Fatal("expected error for failed task")
+	}
+	if !strings.Contains(err.Error(), "任务失败") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -314,37 +474,16 @@ func TestParsers(t *testing.T) {
 	}
 }
 
-// makeDouyinRouterData builds a minimal _ROUTER_DATA JSON for testing.
-func makeDouyinRouterData(title, author, videoURL, coverURL string) string {
-	data := map[string]any{
-		"loaderData": map[string]any{
-			"video_(id)/page": map[string]any{
-				"videoInfoRes": map[string]any{
-					"item_list": []map[string]any{
-						{
-							"desc": title,
-							"video": map[string]any{
-								"play_addr": map[string]any{
-									"url_list": []string{videoURL},
-								},
-								"cover": map[string]any{
-									"url_list": []string{coverURL},
-								},
-							},
-							"author": map[string]any{
-								"sec_uid":  "sec123",
-								"nickname": author,
-								"avatar_thumb": map[string]any{
-									"url_list": []string{"https://example.com/avatar.jpg"},
-								},
-							},
-						},
-					},
-					"filter_list": []any{},
-				},
-			},
-		},
+func TestConfigureDouyin(t *testing.T) {
+	origBase, origKey := douyinCfg()
+	defer ConfigureDouyin(origBase, origKey)
+
+	ConfigureDouyin("http://localhost:9999", "my-key")
+	base, key := douyinCfg()
+	if base != "http://localhost:9999" {
+		t.Errorf("base = %q", base)
 	}
-	b, _ := json.Marshal(data)
-	return string(b)
+	if key != "my-key" {
+		t.Errorf("key = %q", key)
+	}
 }

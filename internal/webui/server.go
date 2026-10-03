@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/narratoai/narrato-go/internal/config"
+	"github.com/narratoai/narrato-go/internal/linkdl"
 	"github.com/narratoai/narrato-go/internal/pipeline"
 	"github.com/narratoai/narrato-go/internal/project"
 	"github.com/narratoai/narrato-go/internal/replicate"
@@ -71,6 +72,8 @@ func Run() {
 	}
 	_ = os.MkdirAll(root, 0o755)
 	_ = os.MkdirAll(filepath.Dir(cfgPath), 0o755)
+
+	linkdl.ConfigureDouyin(cfg.Douyin.BaseURL, cfg.Douyin.APIKey)
 
 	s := &server{cfg: cfg, cfgPath: cfgPath, projectsRoot: root}
 	mux := http.NewServeMux()
