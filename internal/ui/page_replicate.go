@@ -66,10 +66,20 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 	framesHint := widget.NewLabel("提取后在此预览关键帧")
 	framesHint.Importance = widget.LowImportance
 
-	promptEntry := widget.NewMultiLineEntry()
-	promptEntry.SetPlaceHolder("提取出的 SORA2 提示词（可修改后复制使用）")
-	promptEntry.Wrapping = fyne.TextWrapWord
-	promptEntry.SetMinRowsVisible(8)
+	promptEnEntry := widget.NewMultiLineEntry()
+	promptEnEntry.SetPlaceHolder("提取出的英文 SORA2 提示词（可修改后复制使用）")
+	promptEnEntry.Wrapping = fyne.TextWrapWord
+	promptEnEntry.SetMinRowsVisible(8)
+
+	promptZhEntry := widget.NewMultiLineEntry()
+	promptZhEntry.SetPlaceHolder("提取出的中文提示词将显示在这里…")
+	promptZhEntry.Wrapping = fyne.TextWrapWord
+	promptZhEntry.SetMinRowsVisible(8)
+
+	promptTabs := container.NewAppTabs(
+		container.NewTabItem("英文", promptEnEntry),
+		container.NewTabItem("中文", promptZhEntry),
+	)
 
 	analysisEntry := widget.NewMultiLineEntry()
 	analysisEntry.SetPlaceHolder("提取出的提示词分析将显示在这里…")
@@ -87,11 +97,17 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 				framesGrid.Add(img)
 			}
 			framesHint.SetText(fmt.Sprintf("共 %d 张关键帧 · 已保存到 %s", len(res.Frames), res.OutputDir))
-			promptEntry.SetText(res.Prompt)
+			en := res.PromptEN
+			if en == "" {
+				en = res.Prompt
+			}
+			promptEnEntry.SetText(en)
+			promptZhEntry.SetText(res.PromptZH)
 			analysisEntry.SetText(res.Analysis)
 		} else {
 			framesHint.SetText("提取后在此预览关键帧")
-			promptEntry.SetText("")
+			promptEnEntry.SetText("")
+			promptZhEntry.SetText("")
 			analysisEntry.SetText("")
 		}
 		framesGrid.Refresh()
@@ -107,19 +123,21 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 	}
 
 	copyBtn := widget.NewButton("复制提示词", func() {
-		text := strings.TrimSpace(promptEntry.Text)
+		text := strings.TrimSpace(promptEnEntry.Text)
 		if text == "" {
+			status.SetText("暂无提示词")
 			return
 		}
 		fyne.CurrentApp().Clipboard().SetContent(text)
-		status.SetText("已复制提示词到剪贴板")
+		status.SetText("已复制英文提示词到剪贴板")
 	})
 	copyZhBtn := widget.NewButton("复制中文", func() {
-		if last == nil || last.PromptZH == "" {
+		text := strings.TrimSpace(promptZhEntry.Text)
+		if text == "" {
 			status.SetText("未解析到中文提示词")
 			return
 		}
-		fyne.CurrentApp().Clipboard().SetContent(last.PromptZH)
+		fyne.CurrentApp().Clipboard().SetContent(text)
 		status.SetText("已复制中文提示词到剪贴板")
 	})
 	copyZhBtn.Importance = widget.LowImportance
@@ -278,7 +296,7 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 		framesHint,
 		framesGrid,
 		sec("SORA2 提示词"),
-		promptEntry,
+		promptTabs,
 		container.NewHBox(copyBtn, copyZhBtn),
 		moreAcc,
 	)

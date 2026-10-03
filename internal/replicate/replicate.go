@@ -105,7 +105,7 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 
 	progress(45, fmt.Sprintf("已提取 %d 帧，正在分析视频并生成 SORA2 提示词…", len(frames)))
 	client := &Client{BaseURL: p.BaseURL, APIKey: p.APIKey, Model: p.Model, HTTP: p.HTTP}
-	text, err := client.Analyze(ctx, SystemPrompt(p.Template), BuildUserPrompt(len(frames), dur), frames)
+	text, err := client.Analyze(ctx, SystemPrompt(p.Template), BuildUserPrompt(p.Template, len(frames), dur), frames)
 	if err != nil {
 		return nil, err
 	}

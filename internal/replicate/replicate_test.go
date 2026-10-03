@@ -43,15 +43,22 @@ func TestClampFrames(t *testing.T) {
 }
 
 func TestBuildUserPrompt(t *testing.T) {
-	p := replicate.BuildUserPrompt(8, 12.34)
+	p := replicate.BuildUserPrompt(replicate.TemplateStandard, 8, 12.34)
 	if !strings.HasPrefix(p, "这是从一个视频中提取的 8 帧关键画面（按时间顺序）。") {
 		t.Fatalf("prefix: %q", p)
 	}
 	if !strings.HasSuffix(p, "视频实际时长: 12.3秒，请根据此时长分配各场景时间。") {
 		t.Fatalf("suffix: %q", p)
 	}
-	if strings.Contains(replicate.BuildUserPrompt(8, 0), "视频实际时长") {
+	if strings.Contains(replicate.BuildUserPrompt(replicate.TemplateStandard, 8, 0), "视频实际时长") {
 		t.Fatal("no duration hint expected when duration unknown")
+	}
+	sd := replicate.BuildUserPrompt(replicate.TemplateSeedance2, 8, 12.34)
+	if !strings.Contains(sd, "恰好 15 秒") || !strings.Contains(sd, "源视频实际时长: 12.3秒") {
+		t.Fatalf("seedance user prompt: %q", sd)
+	}
+	if !strings.Contains(replicate.BuildUserPrompt(replicate.TemplateSeedance2, 8, 0), "源视频时长未知") {
+		t.Fatal("seedance unknown duration hint")
 	}
 }
 
@@ -65,6 +72,9 @@ func TestSystemPrompts(t *testing.T) {
 	}
 	if !strings.HasPrefix(replicate.SystemPrompt(replicate.TemplateSora2Expert), "# SORA2 视频提示词生成专家") {
 		t.Fatal("sora2 expert template not embedded")
+	}
+	if !strings.HasPrefix(replicate.SystemPrompt(replicate.TemplateSeedance2), "你是 Seedance 2.0") {
+		t.Fatal("seedance2 template not embedded")
 	}
 	if strings.Contains(replicate.SystemPrompt(replicate.TemplateSora2Expert), "\r") {
 		t.Fatal("CRLF should be normalized")

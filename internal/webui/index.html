@@ -31,6 +31,11 @@
   ul.paths { margin:8px 0; padding-left:18px; color:var(--muted); font-size:13px; }
   .frames { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; margin-top:8px; }
   .frames img { width:100%; height:110px; object-fit:contain; background:#0b1018; border-radius:8px; }
+  .subtabs { display:flex; gap:8px; margin:8px 0; }
+  .subtabs button { background:#243044; color:var(--text); border:0; padding:6px 12px; border-radius:8px; cursor:pointer; }
+  .subtabs button.active { background:var(--accent); }
+  .prompt-pane { display:none; }
+  .prompt-pane.active { display:block; }
 </style>
 </head>
 <body>
@@ -123,6 +128,7 @@
           <option value="standard" selected>标准（与原版一致）</option>
           <option value="replicate_expert">复刻SORA2视频提示词专家</option>
           <option value="sora2_expert">SORA2视频提示词专家</option>
+          <option value="seedance2">Seedance 2.0（15秒）</option>
         </select>
       </div>
     </div>
@@ -135,12 +141,20 @@
     <label>提取的关键帧</label>
     <div class="frames" id="repFramesView"></div>
     <label>SORA2 提示词（可修改后复制使用）</label>
-    <textarea id="repPrompt" placeholder="(确认或修改) 提取出的提示词..."></textarea>
+    <div class="subtabs" id="repPromptTabs">
+      <button type="button" class="active" data-prompt-tab="en">英文</button>
+      <button type="button" data-prompt-tab="zh">中文</button>
+    </div>
+    <div id="repPromptEnPane" class="prompt-pane active">
+      <textarea id="repPrompt" placeholder="(确认或修改) 提取出的英文提示词..."></textarea>
+    </div>
+    <div id="repPromptZhPane" class="prompt-pane">
+      <textarea id="repPromptZh" placeholder="提取出的中文提示词将显示在这里..."></textarea>
+    </div>
     <div class="actions">
       <button class="ghost" onclick="copyReplicate('repPrompt')">复制提示词</button>
       <button class="ghost" onclick="copyReplicate('repPromptZh')">复制中文</button>
     </div>
-    <textarea id="repPromptZh" style="display:none"></textarea>
     <label>提取结果分析</label>
     <textarea id="repAnalysis" readonly placeholder="提取出的提示词分析将显示在这里..."></textarea>
   </section>
@@ -356,7 +370,7 @@ async function runReplicate() {
       img.src = '/api/replicate/frame?i=' + i + '&t=' + t;
       view.appendChild(img);
     }
-    $('repPrompt').value = res.prompt || '';
+    $('repPrompt').value = res.prompt_en || res.prompt || '';
     $('repPromptZh').value = res.prompt_zh || '';
     $('repAnalysis').value = res.analysis || '';
     $('repHint').textContent = `完成 · ${res.frames} 张关键帧 · 已保存到 ${res.output_dir}`;
@@ -378,11 +392,22 @@ function clearReplicate() {
   ['repPrompt', 'repPromptZh', 'repAnalysis'].forEach(id => $(id).value = '');
 }
 
+document.querySelectorAll('#repPromptTabs button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('#repPromptTabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const zh = btn.dataset.promptTab === 'zh';
+    $('repPromptEnPane').classList.toggle('active', !zh);
+    $('repPromptZhPane').classList.toggle('active', zh);
+  };
+});
+
 async function copyReplicate(id) {
-  const text = $(id).value.trim();
+  const el = $(id);
+  const text = el.value.trim();
   if (!text) return alert(id === 'repPromptZh' ? '未解析到中文提示词' : '暂无提示词');
   try { await navigator.clipboard.writeText(text); alert('已复制'); }
-  catch { $(id).style.display = ''; $(id).select(); document.execCommand('copy'); alert('已复制'); }
+  catch { el.select(); document.execCommand('copy'); alert('已复制'); }
 }
 
 refresh().then(refreshList).catch(e => alert(e.message||e));
