@@ -1,14 +1,40 @@
 package linkdl
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
-	"regexp"
 	"strings"
+	"sync"
+	"time"
 )
+
+var (
+	douyinMu     sync.RWMutex
+	douyinAPIBase = "http://39.109.101.66:8000"
+	douyinAPIKey  = "dtk_0ebb3c9076ad_NVJtZ8xXbGvYWPi1GCkOuFx5hjGwFgZV"
+)
+
+// ConfigureDouyin sets the self-hosted Douyin_TikTok_Download_API endpoint.
+// Call this after loading config; it is goroutine-safe.
+func ConfigureDouyin(baseURL, apiKey string) {
+	douyinMu.Lock()
+	defer douyinMu.Unlock()
+	if baseURL != "" {
+		douyinAPIBase = strings.TrimRight(baseURL, "/")
+	}
+	if apiKey != "" {
+		douyinAPIKey = apiKey
+	}
+}
+
+func douyinCfg() (base, key string) {
+	douyinMu.RLock()
+	defer douyinMu.RUnlock()
+	return douyinAPIBase, douyinAPIKey
+}
 
 type douyinParser struct{}
 
@@ -19,251 +45,199 @@ func (d *douyinParser) Match(rawURL string) bool {
 		strings.Contains(rawURL, "iesdouyin.com")
 }
 
-var routerDataRE = regexp.MustCompile(`window\._ROUTER_DATA\s*=\s*(.*?)</script>`)
-
 func (d *douyinParser) Parse(ctx context.Context, rawURL string) (*VideoInfo, error) {
-	videoID, err := d.extractVideoID(ctx, rawURL)
-	if err != nil {
-		return nil, fmt.Errorf("抖音: 提取视频ID失败: %w", err)
+	base, key := douyinCfg()
+	if base == "" || key == "" {
+		return nil, fmt.Errorf("抖音: 未配置 Douyin API（请在设置页填写地址和 Key）")
 	}
-	return d.parseWithBase(ctx, videoID, "https://www.iesdouyin.com")
+	return d.parseViaAPI(ctx, rawURL, base, key)
 }
 
-func (d *douyinParser) parseWithBase(ctx context.Context, videoID, baseURL string) (*VideoInfo, error) {
-	shareURL := fmt.Sprintf("%s/share/video/%s/", baseURL, videoID)
+// parseViaAPI calls the self-hosted Douyin_TikTok_Download_API.
+// Exported base/key parameters make this testable without touching globals.
+func (d *douyinParser) parseViaAPI(ctx context.Context, rawURL, apiBase, apiKey string) (*VideoInfo, error) {
+	payload, _ := json.Marshal(map[string]string{"url": rawURL})
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, shareURL, nil)
+	endpoint := apiBase + "/api/v1/parse?wait=25"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("抖音: %w", err)
 	}
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", apiKey)
 
 	resp, err := defaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("抖音: 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("抖音: HTTP %d", resp.StatusCode)
-	}
 
 	body, err := readBodyLimit(resp.Body, 2*1024*1024)
 	if err != nil {
 		return nil, err
 	}
 
-	matches := routerDataRE.FindSubmatch(body)
-	if len(matches) < 2 {
-		return nil, fmt.Errorf("抖音: 页面中未找到 _ROUTER_DATA")
-	}
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return d.extractFromBody(body)
 
-	var routerData map[string]json.RawMessage
-	if err := json.Unmarshal(matches[1], &routerData); err != nil {
-		return nil, fmt.Errorf("抖音: 解析 _ROUTER_DATA 失败: %w", err)
-	}
+	case http.StatusAccepted:
+		return d.pollTask(ctx, body, apiBase, apiKey)
 
-	loaderRaw, ok := routerData["loaderData"]
-	if !ok {
-		return nil, fmt.Errorf("抖音: _ROUTER_DATA 中无 loaderData")
+	default:
+		return nil, d.parseAPIError(body, resp.StatusCode)
 	}
-	var loaderData map[string]json.RawMessage
-	if err := json.Unmarshal(loaderRaw, &loaderData); err != nil {
-		return nil, fmt.Errorf("抖音: loaderData 解析失败: %w", err)
-	}
-
-	var pageRaw json.RawMessage
-	for _, key := range []string{"video_(id)/page", "note_(id)/page"} {
-		if raw, found := loaderData[key]; found {
-			pageRaw = raw
-			break
-		}
-	}
-	if pageRaw == nil {
-		return nil, fmt.Errorf("抖音: loaderData 中无 video/note page 数据")
-	}
-
-	var page struct {
-		VideoInfoRes struct {
-			ItemList   []douyinItem `json:"item_list"`
-			FilterList []struct {
-				DetailMsg string `json:"detail_msg"`
-			} `json:"filter_list"`
-		} `json:"videoInfoRes"`
-	}
-	if err := json.Unmarshal(pageRaw, &page); err != nil {
-		return nil, fmt.Errorf("抖音: page 数据解析失败: %w", err)
-	}
-
-	if len(page.VideoInfoRes.ItemList) == 0 {
-		msg := "无视频信息"
-		if len(page.VideoInfoRes.FilterList) > 0 && page.VideoInfoRes.FilterList[0].DetailMsg != "" {
-			msg = page.VideoInfoRes.FilterList[0].DetailMsg
-		}
-		return nil, fmt.Errorf("抖音: %s", msg)
-	}
-
-	item := page.VideoInfoRes.ItemList[0]
-
-	var images []string
-	if item.Images != nil {
-		for _, img := range item.Images {
-			if len(img.URLList) > 0 && img.URLList[0] != "" {
-				images = append(images, img.URLList[0])
-			}
-		}
-	}
-
-	videoURL := ""
-	if len(item.Video.PlayAddr.URLList) > 0 {
-		videoURL = strings.ReplaceAll(item.Video.PlayAddr.URLList[0], "playwm", "play")
-	}
-	if len(images) > 0 {
-		videoURL = ""
-	}
-
-	if videoURL != "" {
-		redirected, err := d.resolveRedirect(ctx, videoURL)
-		if err == nil && redirected != "" {
-			videoURL = redirected
-		}
-	}
-
-	coverURL := ""
-	if len(item.Video.Cover.URLList) > 0 {
-		coverURL = item.Video.Cover.URLList[0]
-	}
-
-	authorName := ""
-	if item.Author.Nickname != "" {
-		authorName = item.Author.Nickname
-	}
-
-	return &VideoInfo{
-		Platform: "douyin",
-		VideoURL: videoURL,
-		CoverURL: coverURL,
-		Title:    item.Desc,
-		Author:   authorName,
-		Images:   images,
-	}, nil
 }
 
-func (d *douyinParser) extractVideoID(ctx context.Context, rawURL string) (string, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", err
-	}
-
-	// User page with modal_id: the modal_id IS the video ID.
-	if mid := u.Query().Get("modal_id"); mid != "" {
-		return mid, nil
-	}
-
-	// Direct video URL: https://www.douyin.com/video/XXXXX
-	if strings.Contains(u.Path, "/video/") {
-		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-		for i, p := range parts {
-			if p == "video" && i+1 < len(parts) {
-				return parts[i+1], nil
-			}
-		}
-	}
-
-	// Note URL: https://www.douyin.com/note/XXXXX
-	if strings.Contains(u.Path, "/note/") {
-		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-		for i, p := range parts {
-			if p == "note" && i+1 < len(parts) {
-				return parts[i+1], nil
-			}
-		}
-	}
-
-	// Share short link: https://v.douyin.com/XXXXX → follow redirect to get ID
-	if strings.Contains(rawURL, "v.douyin.com") || strings.Contains(rawURL, "iesdouyin.com") {
-		return d.resolveShareLink(ctx, rawURL)
-	}
-
-	// iesdouyin.com/share/video/ID
-	if strings.Contains(u.Path, "/share/video/") {
-		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-		for i, p := range parts {
-			if p == "video" && i+1 < len(parts) {
-				return parts[i+1], nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("无法从链接提取视频ID: %s", rawURL)
+// apiEnvelope is the outer JSON wrapper the API returns.
+type apiEnvelope struct {
+	Success bool            `json:"success"`
+	Data    json.RawMessage `json:"data"`
+	Error   *apiError       `json:"error,omitempty"`
 }
 
-func (d *douyinParser) resolveShareLink(ctx context.Context, shareURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, shareURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", userAgent)
-
-	resp, err := noRedirectClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	loc := resp.Header.Get("Location")
-	if loc == "" {
-		return "", fmt.Errorf("未获取到重定向地址")
-	}
-
-	u, err := url.Parse(loc)
-	if err != nil {
-		return "", err
-	}
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) > 0 {
-		return parts[len(parts)-1], nil
-	}
-	return "", fmt.Errorf("重定向地址中无视频ID")
+type apiError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
-func (d *douyinParser) resolveRedirect(ctx context.Context, videoURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, videoURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", userAgent)
-
-	resp, err := noRedirectClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	loc := resp.Header.Get("Location")
-	if loc != "" {
-		return loc, nil
-	}
-	return videoURL, nil
+type apiMedia struct {
+	Title string `json:"title"`
+	Media struct {
+		Video struct {
+			URL string `json:"url"`
+		} `json:"video"`
+	} `json:"media"`
 }
 
-type douyinItem struct {
-	Desc   string `json:"desc"`
-	Video  struct {
-		PlayAddr struct {
-			URLList []string `json:"url_list"`
-		} `json:"play_addr"`
-		Cover struct {
-			URLList []string `json:"url_list"`
-		} `json:"cover"`
-	} `json:"video"`
-	Images []struct {
-		URLList []string `json:"url_list"`
-	} `json:"images"`
-	Author struct {
-		SecUID    string `json:"sec_uid"`
-		Nickname  string `json:"nickname"`
-		AvatarThumb struct {
-			URLList []string `json:"url_list"`
-		} `json:"avatar_thumb"`
-	} `json:"author"`
+type apiTaskRef struct {
+	TaskID string `json:"task_id"`
+}
+
+type apiTaskPoll struct {
+	State  string          `json:"state"`
+	Result json.RawMessage `json:"result"`
+}
+
+func (d *douyinParser) extractFromBody(body []byte) (*VideoInfo, error) {
+	var env apiEnvelope
+	if err := json.Unmarshal(body, &env); err != nil {
+		return nil, fmt.Errorf("抖音: 解析响应失败: %w", err)
+	}
+	if env.Error != nil && env.Error.Message != "" {
+		return nil, fmt.Errorf("抖音: [%s] %s", env.Error.Code, env.Error.Message)
+	}
+
+	media, err := d.extractMedia(env.Data)
+	if err != nil {
+		return nil, err
+	}
+	return media, nil
+}
+
+// extractMedia tries two layouts:
+//   1. data IS the content: data.media.video.url
+//   2. data has a nested task result: data.result.media.video.url
+func (d *douyinParser) extractMedia(raw json.RawMessage) (*VideoInfo, error) {
+	var m apiMedia
+	if err := json.Unmarshal(raw, &m); err == nil && m.Media.Video.URL != "" {
+		return &VideoInfo{
+			Platform: "douyin",
+			VideoURL: m.Media.Video.URL,
+			Title:    m.Title,
+		}, nil
+	}
+
+	var nested struct {
+		Result apiMedia `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &nested); err == nil && nested.Result.Media.Video.URL != "" {
+		return &VideoInfo{
+			Platform: "douyin",
+			VideoURL: nested.Result.Media.Video.URL,
+			Title:    nested.Result.Title,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("抖音: 响应中未找到视频地址")
+}
+
+func (d *douyinParser) pollTask(ctx context.Context, initialBody []byte, apiBase, apiKey string) (*VideoInfo, error) {
+	var env apiEnvelope
+	if err := json.Unmarshal(initialBody, &env); err != nil {
+		return nil, fmt.Errorf("抖音: 解析 202 响应失败: %w", err)
+	}
+
+	var ref apiTaskRef
+	if err := json.Unmarshal(env.Data, &ref); err != nil || ref.TaskID == "" {
+		return nil, fmt.Errorf("抖音: 202 响应中无 task_id")
+	}
+
+	pollURL := fmt.Sprintf("%s/api/v1/tasks/%s", apiBase, ref.TaskID)
+
+	timeout := 120 * time.Second
+	deadline, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	interval := 2 * time.Second
+	for {
+		select {
+		case <-deadline.Done():
+			return nil, fmt.Errorf("抖音: 轮询超时（%s）", timeout)
+		case <-time.After(interval):
+		}
+
+		req, err := http.NewRequestWithContext(deadline, http.MethodGet, pollURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("抖音: %w", err)
+		}
+		req.Header.Set("X-API-Key", apiKey)
+
+		resp, err := defaultClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("抖音: 轮询请求失败: %w", err)
+		}
+		body, err := readBodyLimit(resp.Body, 2*1024*1024)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode == http.StatusAccepted {
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, d.parseAPIError(body, resp.StatusCode)
+		}
+
+		var pollEnv apiEnvelope
+		if err := json.Unmarshal(body, &pollEnv); err != nil {
+			return nil, fmt.Errorf("抖音: 轮询解析失败: %w", err)
+		}
+		if pollEnv.Error != nil && pollEnv.Error.Message != "" {
+			return nil, fmt.Errorf("抖音: [%s] %s", pollEnv.Error.Code, pollEnv.Error.Message)
+		}
+
+		var task apiTaskPoll
+		if err := json.Unmarshal(pollEnv.Data, &task); err != nil {
+			return nil, fmt.Errorf("抖音: 轮询数据解析失败: %w", err)
+		}
+
+		switch task.State {
+		case "done":
+			return d.extractMedia(task.Result)
+		case "failed":
+			return nil, fmt.Errorf("抖音: 任务失败")
+		default:
+			continue
+		}
+	}
+}
+
+func (d *douyinParser) parseAPIError(body []byte, status int) error {
+	var env apiEnvelope
+	if err := json.Unmarshal(body, &env); err == nil && env.Error != nil && env.Error.Message != "" {
+		return fmt.Errorf("抖音: [%s] %s", env.Error.Code, env.Error.Message)
+	}
+	return fmt.Errorf("抖音: HTTP %d", status)
 }

@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/narratoai/narrato-go/internal/config"
+	"github.com/narratoai/narrato-go/internal/linkdl"
 	"github.com/narratoai/narrato-go/internal/project"
 )
 
@@ -59,6 +60,8 @@ func Run() {
 		root = config.Default().Paths.ProjectsRoot
 	}
 	_ = os.MkdirAll(root, 0o755)
+
+	linkdl.ConfigureDouyin(cfg.Douyin.BaseURL, cfg.Douyin.APIKey)
 
 	// Prefer Windows YaHei before Fyne initializes its font cache.
 	preferSystemFontEnv()

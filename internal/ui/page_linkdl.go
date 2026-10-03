@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/narratoai/narrato-go/internal/config"
@@ -108,12 +108,10 @@ func newLinkDownloadPage(state *AppState) fyne.CanvasObject {
 			}
 		}
 		if len(urls) == 0 {
-			fyne.Do(func() {
-				mu.Lock()
-				setBusy(false)
-				mu.Unlock()
-				status.SetText("请输入至少一个链接")
-			})
+			mu.Lock()
+			setBusy(false)
+			mu.Unlock()
+			status.SetText("请输入至少一个链接")
 			return
 		}
 
@@ -122,7 +120,7 @@ func newLinkDownloadPage(state *AppState) fyne.CanvasObject {
 			outDir = defaultDownloadDir(state.Cfg)
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		mu.Lock()
 		cancelFn = cancel
 		mu.Unlock()
@@ -135,8 +133,14 @@ func newLinkDownloadPage(state *AppState) fyne.CanvasObject {
 			defer func() {
 				mu.Lock()
 				cancelFn = nil
-				setBusy(false)
 				mu.Unlock()
+				// Widget updates must run on the UI thread. Doing this from the
+				// worker (especially while holding mu) deadlocks Fyne on Windows.
+				fyne.Do(func() {
+					mu.Lock()
+					setBusy(false)
+					mu.Unlock()
+				})
 			}()
 
 			success := 0

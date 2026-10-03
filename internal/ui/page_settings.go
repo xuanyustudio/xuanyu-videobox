@@ -12,6 +12,7 @@ import (
 
 	"github.com/narratoai/narrato-go/internal/asr"
 	"github.com/narratoai/narrato-go/internal/config"
+	"github.com/narratoai/narrato-go/internal/linkdl"
 	"github.com/narratoai/narrato-go/internal/project"
 	"github.com/narratoai/narrato-go/internal/replicate"
 )
@@ -69,6 +70,12 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 	repModel.SetText(state.Cfg.Replicate.Model)
 	repModel.SetPlaceHolder(replicate.DefaultModel)
 
+	dyBaseURL := widget.NewEntry()
+	dyBaseURL.SetText(state.Cfg.Douyin.BaseURL)
+	dyBaseURL.SetPlaceHolder("http://39.109.101.66:8000")
+	dyAPIKey := widget.NewPasswordEntry()
+	dyAPIKey.SetText(state.Cfg.Douyin.APIKey)
+
 	hideCheck := widget.NewCheck("原片段隐藏解说字幕", func(bool) {})
 	hideCheck.SetChecked(state.Cfg.UI.SubtitleHideOnOriginal)
 
@@ -97,6 +104,9 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 		state.Cfg.Replicate.BaseURL = strings.TrimSpace(repBaseURL.Text)
 		state.Cfg.Replicate.APIKey = strings.TrimSpace(repAPIKey.Text)
 		state.Cfg.Replicate.Model = strings.TrimSpace(repModel.Text)
+		state.Cfg.Douyin.BaseURL = strings.TrimSpace(dyBaseURL.Text)
+		state.Cfg.Douyin.APIKey = strings.TrimSpace(dyAPIKey.Text)
+		linkdl.ConfigureDouyin(state.Cfg.Douyin.BaseURL, state.Cfg.Douyin.APIKey)
 		if err := config.Save(state.CfgPath, state.Cfg); err != nil {
 			status.SetText(fmt.Sprintf("保存失败: %v", err))
 			return
@@ -119,11 +129,17 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 		widget.NewFormItem("复刻 Base URL", repBaseURL),
 		widget.NewFormItem("复刻 API Key", repAPIKey),
 		widget.NewFormItem("复刻视觉模型", repModel),
+		widget.NewFormItem("抖音 API 地址", dyBaseURL),
+		widget.NewFormItem("抖音 API Key", dyAPIKey),
 	)
 
 	asrHint := widget.NewLabel("字幕识别与 Python 版一致：默认可用「阿里百炼」在线（填 Key 即可）；本地方案需先启动对应 Pack。百炼 Key：https://bailian.console.aliyun.com")
 	asrHint.Wrapping = fyne.TextWrapWord
 	asrHint.Importance = widget.LowImportance
+
+	dyHint := widget.NewLabel("链接下载的抖音解析使用自建 Douyin_TikTok_Download_API，已预填默认地址和 Key，也可替换为自己部署的实例。")
+	dyHint.Wrapping = fyne.TextWrapWord
+	dyHint.Importance = widget.LowImportance
 
 	repHint := widget.NewLabel("爆款复刻使用 OpenAI 兼容的视觉模型（与 Python 版 QWEN_* 配置一致），默认 ModelScope Qwen3-VL。Key：https://modelscope.cn")
 	repHint.Wrapping = fyne.TextWrapWord
@@ -135,6 +151,7 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 			spkCheck,
 			hideCheck,
 			asrHint,
+			dyHint,
 			repHint,
 			saveBtn,
 			status,

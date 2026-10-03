@@ -5,8 +5,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 )
+
+var xiguaRouterDataRE = regexp.MustCompile(`window\._ROUTER_DATA\s*=\s*(.*?)</script>`)
+
+type xiguaItem struct {
+	Desc  string `json:"desc"`
+	Video struct {
+		PlayAddr struct {
+			URLList []string `json:"url_list"`
+		} `json:"play_addr"`
+		Cover struct {
+			URLList []string `json:"url_list"`
+		} `json:"cover"`
+	} `json:"video"`
+	Author struct {
+		Nickname string `json:"nickname"`
+	} `json:"author"`
+}
 
 type xiguaParser struct{}
 
@@ -41,7 +59,7 @@ func (x *xiguaParser) Parse(ctx context.Context, rawURL string) (*VideoInfo, err
 		return nil, err
 	}
 
-	matches := routerDataRE.FindSubmatch(body)
+	matches := xiguaRouterDataRE.FindSubmatch(body)
 	if len(matches) < 2 {
 		return nil, fmt.Errorf("西瓜视频: 页面中未找到 _ROUTER_DATA")
 	}
@@ -50,7 +68,7 @@ func (x *xiguaParser) Parse(ctx context.Context, rawURL string) (*VideoInfo, err
 		LoaderData struct {
 			VideoPage struct {
 				VideoInfoRes struct {
-					ItemList   []douyinItem `json:"item_list"`
+					ItemList   []xiguaItem `json:"item_list"`
 					FilterList []struct {
 						DetailMsg string `json:"detail_msg"`
 					} `json:"filter_list"`
