@@ -8,7 +8,7 @@ import (
 
 // Backends aligned with Python webui fun_asr options.
 const (
-	BackendLocal   = "local"   // FunASR-Pack
+	BackendLocal   = "local"   // FunASR-Pack SenseVoiceSmall
 	BackendFireRed = "firered" // FireRedASR2-AED-Pack
 	BackendBailian = "bailian" // 阿里百炼在线 Fun-ASR
 )
@@ -81,7 +81,7 @@ func BackendLabel(backend string) string {
 	case BackendFireRed:
 		return "本地 FireRedASR"
 	default:
-		return "本地 FunASR-Pack"
+		return LabelLocalFunASR
 	}
 }
 

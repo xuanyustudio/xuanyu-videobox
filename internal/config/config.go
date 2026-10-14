@@ -38,7 +38,7 @@ type FFmpeg struct {
 // ASR holds subtitle transcription settings (aligned with Python fun_asr).
 type ASR struct {
 	Backend       string `yaml:"backend"`         // local | firered | bailian
-	APIURL        string `yaml:"api_url"`         // local FunASR-Pack
+	APIURL        string `yaml:"api_url"`         // local FunASR-Pack SenseVoiceSmall
 	FireRedAPIURL string `yaml:"firered_api_url"` // local FireRed
 	APIKey        string `yaml:"api_key"`         // 阿里百炼
 	Hotword       string `yaml:"hotword"`

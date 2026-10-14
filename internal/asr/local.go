@@ -17,6 +17,16 @@ import (
 const DefaultAPIURL = "http://127.0.0.1:7860"
 const DefaultFireRedAPIURL = "http://127.0.0.1:7867"
 
+// SenseVoiceModel is the FunASR-Pack OpenAI-compatible model id for SenseVoiceSmall.
+// The pack serves Chinese local captions over HTTP; this binary does not embed the model.
+const SenseVoiceModel = "sensevoice"
+
+// FunASRPackDownloadURL is the existing FunASR-Pack Windows bundle hint.
+const FunASRPackDownloadURL = "https://cutagent.online/resources/funasr-v110-windows"
+
+// LabelLocalFunASR is the settings/status name for the local SenseVoiceSmall path.
+const LabelLocalFunASR = "本地 FunASR（SenseVoiceSmall）"
+
 // Client talks to a local FunASR-Pack / FireRed compatible HTTP service.
 type Client struct {
 	APIURL    string
@@ -78,7 +88,7 @@ func (c *Client) TranscribeFile(mediaPath, outPath string) error {
 	var result map[string]any
 	var err error
 	result, err = c.postMultipart(openaiURL, mediaPath, map[string]string{
-		"model":           "sensevoice",
+		"model":           SenseVoiceModel,
 		"response_format": "verbose_json",
 		"spk":             spkFlag(c.EnableSpk),
 	})
@@ -284,7 +294,7 @@ func friendlyDialError(err error, base string) error {
 	msg := err.Error()
 	if strings.Contains(msg, "connection refused") || strings.Contains(msg, "actively refused") ||
 		strings.Contains(msg, "connectex") || strings.Contains(msg, "No connection could be made") {
-		return fmt.Errorf("无法连接本地 FunASR（%s）。请先启动 FunASR-Pack 整合包，再到浏览器打开该地址确认服务已就绪；也可在「设置」里改 API 地址。下载：https://cutagent.online/resources/funasr-v110-windows", base)
+		return fmt.Errorf("无法连接本地 FunASR（%s）。请先启动 FunASR-Pack 整合包，再到浏览器打开该地址确认服务已就绪；也可在「设置」里改 API 地址。下载：%s", base, FunASRPackDownloadURL)
 	}
 	if strings.Contains(msg, "timeout") || strings.Contains(msg, "DeadlineExceeded") {
 		return fmt.Errorf("连接 FunASR 超时（%s），请确认服务已启动且未被防火墙拦截", base)

@@ -32,14 +32,14 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 
 	backend := widget.NewSelect([]string{
 		"阿里百炼 Fun-ASR（在线）",
-		"本地 FunASR-Pack",
+		asr.LabelLocalFunASR,
 		"本地 FireRedASR",
 	}, nil)
 	switch asr.NormalizeBackend(state.Cfg.ASR.Backend) {
 	case asr.BackendFireRed:
 		backend.SetSelected("本地 FireRedASR")
 	case asr.BackendLocal:
-		backend.SetSelected("本地 FunASR-Pack")
+		backend.SetSelected(asr.LabelLocalFunASR)
 	default:
 		backend.SetSelected("阿里百炼 Fun-ASR（在线）")
 	}
@@ -58,7 +58,7 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 	bailianKey.SetText(state.Cfg.ASR.APIKey)
 	hotword := widget.NewEntry()
 	hotword.SetText(state.Cfg.ASR.Hotword)
-	spkCheck := widget.NewCheck("本地 FunASR 说话人分离", nil)
+	spkCheck := widget.NewCheck("本地 SenseVoice 说话人分离", nil)
 	spkCheck.SetChecked(state.Cfg.ASR.EnableSpk)
 
 	repBaseURL := widget.NewEntry()
@@ -80,6 +80,9 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 	hideCheck.SetChecked(state.Cfg.UI.SubtitleHideOnOriginal)
 
 	status := widget.NewLabel("")
+	status.Wrapping = fyne.TextWrapWord
+	oneClickStatus := widget.NewLabel("")
+	oneClickStatus.Wrapping = fyne.TextWrapWord
 
 	saveBtn := widget.NewButton("保存配置", func() {
 		state.Cfg.LLM.BaseURL = baseURL.Text
@@ -90,7 +93,7 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 		switch backend.Selected {
 		case "本地 FireRedASR":
 			state.Cfg.ASR.Backend = asr.BackendFireRed
-		case "本地 FunASR-Pack":
+		case asr.LabelLocalFunASR:
 			state.Cfg.ASR.Backend = asr.BackendLocal
 		default:
 			state.Cfg.ASR.Backend = asr.BackendBailian
@@ -115,17 +118,47 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 	})
 	saveBtn.Importance = widget.HighImportance
 
-	form := widget.NewForm(
+	oneClick := widget.NewButton("一键配置本地 FunASR", func() {
+		backendName, apiURL := asr.LocalFunASRPreset()
+		backend.SetSelected(asr.LabelLocalFunASR)
+		asrURL.SetText(apiURL)
+		state.Cfg.ASR.Backend = backendName
+		state.Cfg.ASR.APIURL = apiURL
+		saveErr := config.Save(state.CfgPath, state.Cfg)
+		if saveErr != nil {
+			oneClickStatus.SetText("已填入本地 FunASR（SenseVoiceSmall），保存失败: " + saveErr.Error())
+		} else {
+			oneClickStatus.SetText("已保存本地 FunASR（SenseVoiceSmall），正在检测服务…")
+		}
+		go func() {
+			err := (&asr.Client{APIURL: apiURL}).Probe()
+			fyne.Do(func() {
+				line := asr.FormatLocalProbeStatus(err)
+				if saveErr != nil {
+					oneClickStatus.SetText("已填入本地 FunASR（SenseVoiceSmall），保存失败: " + saveErr.Error() + " · " + line)
+					return
+				}
+				oneClickStatus.SetText("已保存本地 FunASR（SenseVoiceSmall）· " + line)
+			})
+		}()
+	})
+	oneClick.Importance = widget.HighImportance
+
+	baseForm := widget.NewForm(
 		widget.NewFormItem("LLM Base URL", baseURL),
 		widget.NewFormItem("API Key", apiKey),
 		widget.NewFormItem("Model", model),
 		widget.NewFormItem("ffmpeg 路径", ffmpegPath),
 		widget.NewFormItem("ffprobe 路径", ffprobePath),
+	)
+	asrForm := widget.NewForm(
 		widget.NewFormItem("字幕识别方式", backend),
 		widget.NewFormItem("百炼 API Key", bailianKey),
-		widget.NewFormItem("本地 FunASR 地址", asrURL),
+		widget.NewFormItem("本地 SenseVoice 地址", asrURL),
 		widget.NewFormItem("本地 FireRed 地址", fireredURL),
 		widget.NewFormItem("FunASR 热词", hotword),
+	)
+	tailForm := widget.NewForm(
 		widget.NewFormItem("复刻 Base URL", repBaseURL),
 		widget.NewFormItem("复刻 API Key", repAPIKey),
 		widget.NewFormItem("复刻视觉模型", repModel),
@@ -133,7 +166,10 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 		widget.NewFormItem("抖音 API Key", dyAPIKey),
 	)
 
-	asrHint := widget.NewLabel("字幕识别与 Python 版一致：默认可用「阿里百炼」在线（填 Key 即可）；本地方案需先启动对应 Pack。百炼 Key：https://bailian.console.aliyun.com")
+	asrHint := widget.NewLabel(fmt.Sprintf(
+		"中文本地字幕使用 FunASR-Pack 的 SenseVoiceSmall（HTTP 模型名 %s），不把模型打进本程序。点「一键配置本地 FunASR」会切换到本地、填入 %s 并保存；地址仍可手动修改后点「保存配置」。请先启动整合包：%s。在线识别选「阿里百炼」并填写 Key：https://bailian.console.aliyun.com",
+		asr.SenseVoiceModel, asr.DefaultAPIURL, asr.FunASRPackDownloadURL,
+	))
 	asrHint.Wrapping = fyne.TextWrapWord
 	asrHint.Importance = widget.LowImportance
 
@@ -147,10 +183,14 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 
 	return container.NewVScroll(container.NewPadded(container.NewVBox(
 		widget.NewCard("设置", "配置文件: "+state.CfgPath, container.NewVBox(
-			form,
-			spkCheck,
-			hideCheck,
+			baseForm,
+			asrForm,
+			oneClick,
+			oneClickStatus,
 			asrHint,
+			spkCheck,
+			tailForm,
+			hideCheck,
 			dyHint,
 			repHint,
 			saveBtn,

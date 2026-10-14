@@ -41,6 +41,19 @@ func TestLoadMissingReturnsDefault(t *testing.T) {
 	_ = os.Stderr
 }
 
+func TestDefaultASRKeepsBailianAndLocalURL(t *testing.T) {
+	cfg := config.Default()
+	if cfg.ASR.Backend != "bailian" {
+		t.Fatalf("backend=%q", cfg.ASR.Backend)
+	}
+	if cfg.ASR.APIURL != "http://127.0.0.1:7860" {
+		t.Fatalf("api url=%q", cfg.ASR.APIURL)
+	}
+	if cfg.ASR.FireRedAPIURL != "http://127.0.0.1:7867" {
+		t.Fatalf("firered url=%q", cfg.ASR.FireRedAPIURL)
+	}
+}
+
 func TestReplicateDefaultsAndRoundTrip(t *testing.T) {
 	cfg := config.Default()
 	if cfg.Replicate.BaseURL == "" || cfg.Replicate.Model == "" || cfg.Replicate.Frames != 8 {
