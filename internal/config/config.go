@@ -18,6 +18,8 @@ type Config struct {
 
 	Replicate Replicate `yaml:"replicate" json:"replicate"`
 	Douyin    Douyin    `yaml:"douyin" json:"douyin"`
+	Video     Video     `yaml:"video" json:"video"`
+	Image     ImageGen  `yaml:"image" json:"image"`
 }
 
 type LLM struct {
@@ -38,7 +40,7 @@ type FFmpeg struct {
 // ASR holds subtitle transcription settings (aligned with Python fun_asr).
 type ASR struct {
 	Backend       string `yaml:"backend"`         // local | firered | bailian
-	APIURL        string `yaml:"api_url"`         // local FunASR-Pack
+	APIURL        string `yaml:"api_url"`         // local FunASR-Pack SenseVoiceSmall
 	FireRedAPIURL string `yaml:"firered_api_url"` // local FireRed
 	APIKey        string `yaml:"api_key"`         // 阿里百炼
 	Hotword       string `yaml:"hotword"`
@@ -64,6 +66,19 @@ type Replicate struct {
 type Douyin struct {
 	BaseURL string `yaml:"base_url" json:"base_url"`
 	APIKey  string `yaml:"api_key" json:"api_key"`
+}
+
+// Video holds the AI 视频工作台 key used by the intro clip.
+type Video struct {
+	APIKey string `yaml:"api_key" json:"api_key"`
+}
+
+// ImageGen holds the OpenAI-compatible image edit endpoint used for four-view sheets.
+// APIKey may be empty; the intro page then falls back to the replicate key.
+type ImageGen struct {
+	BaseURL string `yaml:"base_url" json:"base_url"`
+	APIKey  string `yaml:"api_key" json:"api_key"`
+	Model   string `yaml:"model" json:"model"`
 }
 
 type Paths struct {
@@ -100,6 +115,9 @@ func Default() *Config {
 		Douyin: Douyin{
 			BaseURL: "http://39.109.101.66:8000",
 			APIKey:  "dtk_0ebb3c9076ad_NVJtZ8xXbGvYWPi1GCkOuFx5hjGwFgZV",
+		},
+		Image: ImageGen{
+			Model: "gpt-image-1",
 		},
 	}
 }

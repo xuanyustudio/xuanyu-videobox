@@ -41,6 +41,19 @@ func TestLoadMissingReturnsDefault(t *testing.T) {
 	_ = os.Stderr
 }
 
+func TestDefaultASRKeepsBailianAndLocalURL(t *testing.T) {
+	cfg := config.Default()
+	if cfg.ASR.Backend != "bailian" {
+		t.Fatalf("backend=%q", cfg.ASR.Backend)
+	}
+	if cfg.ASR.APIURL != "http://127.0.0.1:7860" {
+		t.Fatalf("api url=%q", cfg.ASR.APIURL)
+	}
+	if cfg.ASR.FireRedAPIURL != "http://127.0.0.1:7867" {
+		t.Fatalf("firered url=%q", cfg.ASR.FireRedAPIURL)
+	}
+}
+
 func TestReplicateDefaultsAndRoundTrip(t *testing.T) {
 	cfg := config.Default()
 	if cfg.Replicate.BaseURL == "" || cfg.Replicate.Model == "" || cfg.Replicate.Frames != 8 {
@@ -61,5 +74,45 @@ func TestReplicateDefaultsAndRoundTrip(t *testing.T) {
 	}
 	if got.Replicate.APIKey != "ms-test" || got.Replicate.Frames != 12 {
 		t.Fatalf("got %#v", got.Replicate)
+	}
+}
+
+func TestVideoKeyRoundTrip(t *testing.T) {
+	cfg := config.Default()
+	if cfg.Video.APIKey != "" {
+		t.Fatal("video api key must not have a default")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg.Video.APIKey = "vw_test"
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Video.APIKey != "vw_test" {
+		t.Fatalf("video key=%q", got.Video.APIKey)
+	}
+}
+
+func TestImageGenDefaultsAndRoundTrip(t *testing.T) {
+	cfg := config.Default()
+	if cfg.Image.Model != "gpt-image-1" || cfg.Image.APIKey != "" || cfg.Image.BaseURL != "" {
+		t.Fatalf("image defaults: %#v", cfg.Image)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg.Image.BaseURL = "https://ai.example.com/v1"
+	cfg.Image.APIKey = "sk-img"
+	cfg.Image.Model = "gpt-image-2"
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Image.BaseURL != cfg.Image.BaseURL || got.Image.APIKey != "sk-img" || got.Image.Model != "gpt-image-2" {
+		t.Fatalf("got %#v", got.Image)
 	}
 }

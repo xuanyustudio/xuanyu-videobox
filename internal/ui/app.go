@@ -151,6 +151,7 @@ func Run() {
 	state.onLeaveWorkspace = showHome
 
 	atlasPage := newAtlasPage()
+	introPage := newIntroPage(state)
 	mainTabs := container.NewAppTabs(
 		container.NewTabItem("工程", homeStack),
 		container.NewTabItem("设置", settingsPage),
@@ -159,11 +160,13 @@ func Run() {
 		container.NewTabItem("链接下载", linkDLPage),
 		container.NewTabItem("AB 拼接", abSplicePage),
 		container.NewTabItem("手法图鉴", atlasPage),
+		container.NewTabItem("介绍片", introPage),
 	)
 	mainTabs.SetTabLocation(container.TabLocationTop)
 
 	w.SetContent(container.NewBorder(nil, container.NewPadded(statusBar), nil, nil, mainTabs))
 	refreshProject()
+	trackIME(w)
 	w.ShowAndRun()
 }
 
