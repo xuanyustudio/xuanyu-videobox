@@ -1,7 +1,6 @@
 package asr
 
 import (
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -13,19 +12,21 @@ import (
 	"testing"
 )
 
-func TestLocalFunASRPreset(t *testing.T) {
-	backend, apiURL := LocalFunASRPreset()
-	if backend != BackendLocal {
-		t.Fatalf("backend=%q", backend)
+func TestEnsureLocalASRURLs(t *testing.T) {
+	if EnsureFunASRURL("") != DefaultAPIURL || EnsureFunASRURL("  ") != DefaultAPIURL {
+		t.Fatalf("empty funasr url=%q", EnsureFunASRURL(""))
 	}
-	if apiURL != DefaultAPIURL {
-		t.Fatalf("apiURL=%q", apiURL)
+	if EnsureFunASRURL(" http://10.0.0.8:7860 ") != "http://10.0.0.8:7860" {
+		t.Fatal("custom funasr url was overwritten")
 	}
 	if DefaultAPIURL != "http://127.0.0.1:7860" {
 		t.Fatalf("default url=%q", DefaultAPIURL)
 	}
-	if NormalizeBackend(backend) != BackendLocal {
-		t.Fatal("preset backend should stay on the local FunASR path")
+	if EnsureFireRedURL("") != DefaultFireRedAPIURL {
+		t.Fatal("empty firered url")
+	}
+	if EnsureFireRedURL("http://127.0.0.1:9000") != "http://127.0.0.1:9000" {
+		t.Fatal("custom firered url was overwritten")
 	}
 	if BackendLabel(BackendBailian) != "阿里百炼 Fun-ASR" {
 		t.Fatalf("bailian label changed: %q", BackendLabel(BackendBailian))
@@ -35,25 +36,6 @@ func TestLocalFunASRPreset(t *testing.T) {
 	}
 	if BackendLabel(BackendLocal) != LabelLocalFunASR || !strings.Contains(LabelLocalFunASR, "SenseVoiceSmall") {
 		t.Fatalf("local label=%q", BackendLabel(BackendLocal))
-	}
-}
-
-func TestFormatLocalProbeStatus(t *testing.T) {
-	ok := FormatLocalProbeStatus(nil)
-	if !strings.Contains(ok, "已连接") || !strings.Contains(ok, "SenseVoiceSmall") {
-		t.Fatalf("connected status=%q", ok)
-	}
-	refused := friendlyDialError(fmt.Errorf("dial tcp 127.0.0.1:7860: connect: connection refused"), DefaultAPIURL)
-	status := FormatLocalProbeStatus(refused)
-	if !strings.HasPrefix(status, "未启动") {
-		t.Fatalf("status=%q", status)
-	}
-	if !strings.Contains(status, FunASRPackDownloadURL) {
-		t.Fatalf("missing download hint: %q", status)
-	}
-	other := FormatLocalProbeStatus(fmt.Errorf("HTTP 500"))
-	if !strings.HasPrefix(other, "未连接") || !strings.Contains(other, "HTTP 500") {
-		t.Fatalf("other=%q", other)
 	}
 }
 
@@ -76,9 +58,8 @@ func TestProbeSuccessAndRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected connection refused")
 	}
-	status := FormatLocalProbeStatus(err)
-	if !strings.HasPrefix(status, "未启动") || !strings.Contains(status, FunASRPackDownloadURL) {
-		t.Fatalf("status=%q err=%v", status, err)
+	if !strings.Contains(err.Error(), FunASRPackDownloadURL) || !strings.Contains(err.Error(), "无法连接") {
+		t.Fatalf("err=%v", err)
 	}
 }
 

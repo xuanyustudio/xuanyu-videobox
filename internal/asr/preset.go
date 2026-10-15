@@ -2,27 +2,19 @@ package asr
 
 import "strings"
 
-// LocalFunASRPreset is the one-click SenseVoiceSmall / FunASR-Pack setup.
-// It always selects the local backend and the default pack address.
-// Callers can still edit the URL afterwards and save a manual override.
-func LocalFunASRPreset() (backend, apiURL string) {
-	return BackendLocal, DefaultAPIURL
+// EnsureFunASRURL returns the FunASR-Pack address for SenseVoiceSmall.
+// An empty field gets the default; a manual URL is kept.
+func EnsureFunASRURL(current string) string {
+	if strings.TrimSpace(current) == "" {
+		return DefaultAPIURL
+	}
+	return strings.TrimSpace(current)
 }
 
-// FormatLocalProbeStatus turns Client.Probe into a short Chinese settings line.
-// A nil error means the pack responded. Dial failures keep the existing
-// FunASR-Pack download hint that Probe already puts in the error text.
-func FormatLocalProbeStatus(err error) string {
-	if err == nil {
-		return "已连接 SenseVoiceSmall（FunASR-Pack）"
+// EnsureFireRedURL returns the FireRed address, using the default when empty.
+func EnsureFireRedURL(current string) string {
+	if strings.TrimSpace(current) == "" {
+		return DefaultFireRedAPIURL
 	}
-	msg := err.Error()
-	if strings.Contains(msg, "无法连接") ||
-		strings.Contains(msg, "connection refused") ||
-		strings.Contains(msg, "actively refused") ||
-		strings.Contains(msg, "connectex") ||
-		strings.Contains(msg, "No connection could be made") {
-		return "未启动。" + msg
-	}
-	return "未连接。" + msg
+	return strings.TrimSpace(current)
 }

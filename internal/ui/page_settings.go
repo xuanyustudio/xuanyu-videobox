@@ -17,6 +17,11 @@ import (
 	"github.com/narratoai/narrato-go/internal/replicate"
 )
 
+const (
+	asrChoiceBailian = "阿里百炼 Fun-ASR（在线）"
+	asrChoiceFireRed = "本地 FireRedASR"
+)
+
 func newSettingsPage(state *AppState) fyne.CanvasObject {
 	baseURL := widget.NewEntry()
 	baseURL.SetText(state.Cfg.LLM.BaseURL)
@@ -27,38 +32,37 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 
 	ffmpegPath := widget.NewEntry()
 	ffmpegPath.SetText(state.Cfg.FFmpeg.Path)
+	ffmpegPath.SetPlaceHolder("留空 = 系统 PATH")
 	ffprobePath := widget.NewEntry()
 	ffprobePath.SetText(state.Cfg.FFmpeg.FFprobePath)
+	ffprobePath.SetPlaceHolder("留空 = 系统 PATH")
 
 	backend := widget.NewSelect([]string{
-		"阿里百炼 Fun-ASR（在线）",
+		asrChoiceBailian,
 		asr.LabelLocalFunASR,
-		"本地 FireRedASR",
+		asrChoiceFireRed,
 	}, nil)
 	switch asr.NormalizeBackend(state.Cfg.ASR.Backend) {
 	case asr.BackendFireRed:
-		backend.SetSelected("本地 FireRedASR")
+		backend.SetSelected(asrChoiceFireRed)
 	case asr.BackendLocal:
 		backend.SetSelected(asr.LabelLocalFunASR)
 	default:
-		backend.SetSelected("阿里百炼 Fun-ASR（在线）")
+		backend.SetSelected(asrChoiceBailian)
 	}
 
 	asrURL := widget.NewEntry()
 	asrURL.SetText(state.Cfg.ASR.APIURL)
-	if asrURL.Text == "" {
-		asrURL.SetText(asr.DefaultAPIURL)
-	}
+	asrURL.SetPlaceHolder(asr.DefaultAPIURL)
 	fireredURL := widget.NewEntry()
 	fireredURL.SetText(state.Cfg.ASR.FireRedAPIURL)
-	if fireredURL.Text == "" {
-		fireredURL.SetText(asr.DefaultFireRedAPIURL)
-	}
+	fireredURL.SetPlaceHolder(asr.DefaultFireRedAPIURL)
 	bailianKey := widget.NewPasswordEntry()
 	bailianKey.SetText(state.Cfg.ASR.APIKey)
 	hotword := widget.NewEntry()
 	hotword.SetText(state.Cfg.ASR.Hotword)
-	spkCheck := widget.NewCheck("本地 SenseVoice 说话人分离", nil)
+	hotword.SetPlaceHolder("可选")
+	spkCheck := widget.NewCheck("说话人分离", nil)
 	spkCheck.SetChecked(state.Cfg.ASR.EnableSpk)
 
 	repBaseURL := widget.NewEntry()
@@ -81,25 +85,69 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 
 	status := widget.NewLabel("")
 	status.Wrapping = fyne.TextWrapWord
-	oneClickStatus := widget.NewLabel("")
-	oneClickStatus.Wrapping = fyne.TextWrapWord
+
+	asrHint := widget.NewLabel("")
+	asrHint.Wrapping = fyne.TextWrapWord
+	asrHint.Importance = widget.LowImportance
+
+	localBox := container.NewVBox(
+		settingsField("SenseVoice 地址", asrURL),
+		settingsField("热词", hotword),
+		spkCheck,
+	)
+	bailianBox := settingsField("百炼 API Key", bailianKey)
+	fireredBox := settingsField("FireRed 地址", fireredURL)
+	asrBody := container.NewVBox()
+
+	showASR := func(selected string) {
+		var fields fyne.CanvasObject
+		switch selected {
+		case asr.LabelLocalFunASR:
+			asrURL.SetText(asr.EnsureFunASRURL(asrURL.Text))
+			state.Cfg.ASR.Backend = asr.BackendLocal
+			state.Cfg.ASR.APIURL = asrURL.Text
+			asrHint.SetText(fmt.Sprintf("中文本地字幕使用 FunASR-Pack 的 SenseVoiceSmall（模型 %s）。请先启动整合包：%s", asr.SenseVoiceModel, asr.FunASRPackDownloadURL))
+			fields = localBox
+		case asrChoiceFireRed:
+			fireredURL.SetText(asr.EnsureFireRedURL(fireredURL.Text))
+			state.Cfg.ASR.Backend = asr.BackendFireRed
+			state.Cfg.ASR.FireRedAPIURL = fireredURL.Text
+			asrHint.SetText("请先启动 FireRedASR 整合包，地址可手动修改。")
+			fields = fireredBox
+		default:
+			state.Cfg.ASR.Backend = asr.BackendBailian
+			asrHint.SetText("在线识别。Key：https://bailian.console.aliyun.com")
+			fields = bailianBox
+		}
+		asrBody.Objects = []fyne.CanvasObject{fields, asrHint}
+		asrBody.Refresh()
+	}
+	backend.OnChanged = func(selected string) {
+		showASR(selected)
+		status.SetText("识别方式已切换，点「保存配置」后下次启动仍然有效")
+	}
+	showASR(backend.Selected)
 
 	saveBtn := widget.NewButton("保存配置", func() {
-		state.Cfg.LLM.BaseURL = baseURL.Text
+		state.Cfg.LLM.BaseURL = strings.TrimSpace(baseURL.Text)
 		state.Cfg.LLM.APIKey = apiKey.Text
-		state.Cfg.LLM.Model = model.Text
-		state.Cfg.FFmpeg.Path = ffmpegPath.Text
-		state.Cfg.FFmpeg.FFprobePath = ffprobePath.Text
+		state.Cfg.LLM.Model = strings.TrimSpace(model.Text)
+		state.Cfg.FFmpeg.Path = strings.TrimSpace(ffmpegPath.Text)
+		state.Cfg.FFmpeg.FFprobePath = strings.TrimSpace(ffprobePath.Text)
+		state.Cfg.ASR.APIURL = strings.TrimSpace(asrURL.Text)
+		state.Cfg.ASR.FireRedAPIURL = strings.TrimSpace(fireredURL.Text)
 		switch backend.Selected {
-		case "本地 FireRedASR":
+		case asrChoiceFireRed:
 			state.Cfg.ASR.Backend = asr.BackendFireRed
+			state.Cfg.ASR.FireRedAPIURL = asr.EnsureFireRedURL(fireredURL.Text)
+			fireredURL.SetText(state.Cfg.ASR.FireRedAPIURL)
 		case asr.LabelLocalFunASR:
 			state.Cfg.ASR.Backend = asr.BackendLocal
+			state.Cfg.ASR.APIURL = asr.EnsureFunASRURL(asrURL.Text)
+			asrURL.SetText(state.Cfg.ASR.APIURL)
 		default:
 			state.Cfg.ASR.Backend = asr.BackendBailian
 		}
-		state.Cfg.ASR.APIURL = strings.TrimSpace(asrURL.Text)
-		state.Cfg.ASR.FireRedAPIURL = strings.TrimSpace(fireredURL.Text)
 		state.Cfg.ASR.APIKey = strings.TrimSpace(bailianKey.Text)
 		state.Cfg.ASR.Hotword = strings.TrimSpace(hotword.Text)
 		state.Cfg.ASR.EnableSpk = spkCheck.Checked
@@ -118,85 +166,47 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 	})
 	saveBtn.Importance = widget.HighImportance
 
-	oneClick := widget.NewButton("一键配置本地 FunASR", func() {
-		backendName, apiURL := asr.LocalFunASRPreset()
-		backend.SetSelected(asr.LabelLocalFunASR)
-		asrURL.SetText(apiURL)
-		state.Cfg.ASR.Backend = backendName
-		state.Cfg.ASR.APIURL = apiURL
-		saveErr := config.Save(state.CfgPath, state.Cfg)
-		if saveErr != nil {
-			oneClickStatus.SetText("已填入本地 FunASR（SenseVoiceSmall），保存失败: " + saveErr.Error())
-		} else {
-			oneClickStatus.SetText("已保存本地 FunASR（SenseVoiceSmall），正在检测服务…")
-		}
-		go func() {
-			err := (&asr.Client{APIURL: apiURL}).Probe()
-			fyne.Do(func() {
-				line := asr.FormatLocalProbeStatus(err)
-				if saveErr != nil {
-					oneClickStatus.SetText("已填入本地 FunASR（SenseVoiceSmall），保存失败: " + saveErr.Error() + " · " + line)
-					return
-				}
-				oneClickStatus.SetText("已保存本地 FunASR（SenseVoiceSmall）· " + line)
-			})
-		}()
-	})
-	oneClick.Importance = widget.HighImportance
-
-	baseForm := widget.NewForm(
-		widget.NewFormItem("LLM Base URL", baseURL),
-		widget.NewFormItem("API Key", apiKey),
-		widget.NewFormItem("Model", model),
-		widget.NewFormItem("ffmpeg 路径", ffmpegPath),
-		widget.NewFormItem("ffprobe 路径", ffprobePath),
-	)
-	asrForm := widget.NewForm(
-		widget.NewFormItem("字幕识别方式", backend),
-		widget.NewFormItem("百炼 API Key", bailianKey),
-		widget.NewFormItem("本地 SenseVoice 地址", asrURL),
-		widget.NewFormItem("本地 FireRed 地址", fireredURL),
-		widget.NewFormItem("FunASR 热词", hotword),
-	)
-	tailForm := widget.NewForm(
-		widget.NewFormItem("复刻 Base URL", repBaseURL),
-		widget.NewFormItem("复刻 API Key", repAPIKey),
-		widget.NewFormItem("复刻视觉模型", repModel),
-		widget.NewFormItem("抖音 API 地址", dyBaseURL),
-		widget.NewFormItem("抖音 API Key", dyAPIKey),
-	)
-
-	asrHint := widget.NewLabel(fmt.Sprintf(
-		"中文本地字幕使用 FunASR-Pack 的 SenseVoiceSmall（HTTP 模型名 %s），不把模型打进本程序。点「一键配置本地 FunASR」会切换到本地、填入 %s 并保存；地址仍可手动修改后点「保存配置」。请先启动整合包：%s。在线识别选「阿里百炼」并填写 Key：https://bailian.console.aliyun.com",
-		asr.SenseVoiceModel, asr.DefaultAPIURL, asr.FunASRPackDownloadURL,
-	))
-	asrHint.Wrapping = fyne.TextWrapWord
-	asrHint.Importance = widget.LowImportance
-
-	dyHint := widget.NewLabel("链接下载的抖音解析使用自建 Douyin_TikTok_Download_API，已预填默认地址和 Key，也可替换为自己部署的实例。")
-	dyHint.Wrapping = fyne.TextWrapWord
-	dyHint.Importance = widget.LowImportance
-
-	repHint := widget.NewLabel("爆款复刻使用 OpenAI 兼容的视觉模型（与 Python 版 QWEN_* 配置一致），默认 ModelScope Qwen3-VL。Key：https://modelscope.cn")
-	repHint.Wrapping = fyne.TextWrapWord
-	repHint.Importance = widget.LowImportance
+	cfgPath := widget.NewLabel("配置文件：" + state.CfgPath)
+	cfgPath.Wrapping = fyne.TextWrapWord
+	cfgPath.Importance = widget.LowImportance
 
 	return container.NewVScroll(container.NewPadded(container.NewVBox(
-		widget.NewCard("设置", "配置文件: "+state.CfgPath, container.NewVBox(
-			baseForm,
-			asrForm,
-			oneClick,
-			oneClickStatus,
-			asrHint,
-			spkCheck,
-			tailForm,
-			hideCheck,
-			dyHint,
-			repHint,
-			saveBtn,
-			status,
+		widget.NewCard("大模型", "", container.NewVBox(
+			settingsField("Base URL", baseURL),
+			container.NewGridWithColumns(2,
+				settingsField("API Key", apiKey),
+				settingsField("Model", model),
+			),
 		)),
+		widget.NewCard("ffmpeg", "留空则使用系统 PATH", container.NewGridWithColumns(2,
+			settingsField("ffmpeg 路径", ffmpegPath),
+			settingsField("ffprobe 路径", ffprobePath),
+		)),
+		widget.NewCard("字幕识别", "选择本地 FunASR 后自动填入 SenseVoiceSmall 地址，仍可手改", container.NewVBox(
+			settingsField("识别方式", backend),
+			asrBody,
+		)),
+		widget.NewCard("爆款复刻", "默认 ModelScope Qwen3-VL", container.NewVBox(
+			settingsField("Base URL", repBaseURL),
+			container.NewGridWithColumns(2,
+				settingsField("API Key", repAPIKey),
+				settingsField("视觉模型", repModel),
+			),
+		)),
+		widget.NewCard("链接下载", "抖音解析地址和 Key，可换成自己部署的实例", container.NewGridWithColumns(2,
+			settingsField("API 地址", dyBaseURL),
+			settingsField("API Key", dyAPIKey),
+		)),
+		widget.NewCard("界面", "", hideCheck),
+		container.NewHBox(saveBtn),
+		status,
+		cfgPath,
 	)))
+}
+
+func settingsField(label string, obj fyne.CanvasObject) fyne.CanvasObject {
+	name := widget.NewLabel(label)
+	return container.NewVBox(name, obj)
 }
 
 func saveProject(state *AppState) error {
