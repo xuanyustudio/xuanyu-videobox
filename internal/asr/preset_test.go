@@ -38,6 +38,21 @@ func TestLocalFunASRPreset(t *testing.T) {
 	}
 }
 
+func TestEnsureLocalASRURLs(t *testing.T) {
+	if EnsureFunASRURL("") != DefaultAPIURL || EnsureFunASRURL("  ") != DefaultAPIURL {
+		t.Fatalf("empty funasr url=%q", EnsureFunASRURL(""))
+	}
+	if EnsureFunASRURL(" http://10.0.0.8:7860 ") != "http://10.0.0.8:7860" {
+		t.Fatal("custom funasr url was overwritten")
+	}
+	if EnsureFireRedURL("") != DefaultFireRedAPIURL {
+		t.Fatal("empty firered url")
+	}
+	if EnsureFireRedURL("http://127.0.0.1:9000") != "http://127.0.0.1:9000" {
+		t.Fatal("custom firered url was overwritten")
+	}
+}
+
 func TestFormatLocalProbeStatus(t *testing.T) {
 	ok := FormatLocalProbeStatus(nil)
 	if !strings.Contains(ok, "已连接") || !strings.Contains(ok, "SenseVoiceSmall") {
@@ -79,6 +94,9 @@ func TestProbeSuccessAndRefused(t *testing.T) {
 	status := FormatLocalProbeStatus(err)
 	if !strings.HasPrefix(status, "未启动") || !strings.Contains(status, FunASRPackDownloadURL) {
 		t.Fatalf("status=%q err=%v", status, err)
+	}
+	if !strings.Contains(err.Error(), FunASRPackDownloadURL) || !strings.Contains(err.Error(), "无法连接") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
