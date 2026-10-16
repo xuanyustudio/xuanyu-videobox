@@ -152,8 +152,9 @@ func Run() {
 
 	atlasPage := newAtlasPage()
 	introPage := newIntroPage(state)
+	audioPage := newAudioSplitPage(state)
 	mainTabs := container.NewAppTabs(
-		container.NewTabItem("工程", homeStack),
+		container.NewTabItem("短剧解说", homeStack),
 		container.NewTabItem("设置", settingsPage),
 		container.NewTabItem("一键原创", originalPage),
 		container.NewTabItem("爆款复刻", replicatePage),
@@ -161,6 +162,7 @@ func Run() {
 		container.NewTabItem("AB 拼接", abSplicePage),
 		container.NewTabItem("手法图鉴", atlasPage),
 		container.NewTabItem("介绍片", introPage),
+		container.NewTabItem("音频分离", audioPage),
 	)
 	mainTabs.SetTabLocation(container.TabLocationTop)
 

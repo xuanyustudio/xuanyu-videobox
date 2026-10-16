@@ -179,7 +179,7 @@ func newProjectPage(state *AppState) (fyne.CanvasObject, func()) {
 		}
 	}
 
-	header := container.NewBorder(nil, nil, widget.NewLabelWithStyle("工程", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, status)
+	header := container.NewBorder(nil, nil, widget.NewLabelWithStyle("短剧解说", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, status)
 	return container.NewBorder(container.NewPadded(header), nil, nil, nil, scroll), refreshList
 }
 

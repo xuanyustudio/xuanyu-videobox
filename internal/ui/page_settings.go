@@ -4,11 +4,15 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"net/url"
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/narratoai/narrato-go/internal/asr"
@@ -103,56 +107,25 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 
 	status := widget.NewLabel("")
 	status.Wrapping = fyne.TextWrapWord
-	oneClickStatus := widget.NewLabel("")
-	oneClickStatus.Wrapping = fyne.TextWrapWord
 
 	asrHint := widget.NewLabel("")
 	asrHint.Wrapping = fyne.TextWrapWord
 	asrHint.Importance = widget.LowImportance
 
 	localBox := container.NewVBox()
-	bailianBox := settingsField("百炼 API Key", bailianKey)
-	fireredBox := settingsField("FireRed 地址", fireredURL)
+	bailianBox := settingsForm(widget.NewLabel("百炼 API Key"), bailianKey)
+	fireredBox := settingsForm(widget.NewLabel("FireRed 地址"), fireredURL)
 	asrBody := container.NewVBox()
 
-	var showASR func(string)
-	oneClick := widget.NewButton("一键配置本地 FunASR", func() {
-		backendName, apiURL := asr.LocalFunASRPreset()
-		backend.SetSelected(asr.LabelLocalFunASR)
-		asrURL.SetText(apiURL)
-		state.Cfg.ASR.Backend = backendName
-		state.Cfg.ASR.APIURL = apiURL
-		if showASR != nil {
-			showASR(asr.LabelLocalFunASR)
-		}
-		saveErr := config.Save(state.CfgPath, state.Cfg)
-		if saveErr != nil {
-			oneClickStatus.SetText("已填入本地 FunASR（SenseVoiceSmall），保存失败: " + saveErr.Error())
-		} else {
-			oneClickStatus.SetText("已保存本地 FunASR（SenseVoiceSmall），正在检测服务…")
-		}
-		go func() {
-			err := (&asr.Client{APIURL: apiURL}).Probe()
-			fyne.Do(func() {
-				line := asr.FormatLocalProbeStatus(err)
-				if saveErr != nil {
-					oneClickStatus.SetText("已填入本地 FunASR（SenseVoiceSmall），保存失败: " + saveErr.Error() + " · " + line)
-					return
-				}
-				oneClickStatus.SetText("已保存本地 FunASR（SenseVoiceSmall）· " + line)
-			})
-		}()
-	})
-	oneClick.Importance = widget.HighImportance
 	localBox.Objects = []fyne.CanvasObject{
-		settingsField("SenseVoice 地址", asrURL),
-		settingsField("热词", hotword),
+		settingsForm(
+			widget.NewLabel("SenseVoice 地址"), asrURL,
+			widget.NewLabel("热词"), hotword,
+		),
 		spkCheck,
-		oneClick,
-		oneClickStatus,
 	}
 
-	showASR = func(selected string) {
+	showASR := func(selected string) {
 		var fields fyne.CanvasObject
 		switch selected {
 		case asr.LabelLocalFunASR:
@@ -229,67 +202,84 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 		widget.NewHyperlink("打开工作台", workbenchURL),
 		widget.NewHyperlink("接口文档", docsURL),
 	)
-	videoHint := widget.NewLabel("介绍片使用 AI 视频工作台的密钥，额度与网页端共用。")
-	videoHint.Wrapping = fyne.TextWrapWord
-	videoHint.Importance = widget.LowImportance
-	imageHint := widget.NewLabel("四视图走这里的地址和模型，与上方「视觉模型」分开。地址或密钥留空时，沿用复刻 Base URL 和复刻 API Key。")
-	imageHint.Wrapping = fyne.TextWrapWord
-	imageHint.Importance = widget.LowImportance
 
 	cfgPath := widget.NewLabel("配置文件：" + state.CfgPath)
 	cfgPath.Wrapping = fyne.TextWrapWord
 	cfgPath.Importance = widget.LowImportance
 
-	return container.NewVScroll(container.NewPadded(container.NewVBox(
-		widget.NewCard("大模型", "", container.NewVBox(
-			settingsField("Base URL", baseURL),
-			container.NewGridWithColumns(2,
-				settingsField("API Key", apiKey),
-				settingsField("Model", model),
-			),
+	page := container.NewVBox(
+		settingsCard("大模型", "", settingsForm(
+			widget.NewLabel("Base URL"), baseURL,
+			widget.NewLabel("API Key"), apiKey,
+			widget.NewLabel("Model"), model,
 		)),
-		widget.NewCard("ffmpeg", "留空则使用系统 PATH", container.NewGridWithColumns(2,
-			settingsField("ffmpeg 路径", ffmpegPath),
-			settingsField("ffprobe 路径", ffprobePath),
+		settingsCard("ffmpeg", "留空则使用系统 PATH", settingsForm(
+			widget.NewLabel("ffmpeg 路径"), ffmpegPath,
+			widget.NewLabel("ffprobe 路径"), ffprobePath,
 		)),
-		widget.NewCard("字幕识别", "选择本地 FunASR 后自动填入 SenseVoiceSmall 地址，仍可手改", container.NewVBox(
-			settingsField("识别方式", backend),
+		settingsCard("字幕识别", "选择本地 FunASR 后自动填入 SenseVoiceSmall 地址，仍可手改", container.NewVBox(
+			settingsForm(widget.NewLabel("识别方式"), backend),
 			asrBody,
 		)),
-		widget.NewCard("爆款复刻", "默认 ModelScope Qwen3-VL", container.NewVBox(
-			settingsField("Base URL", repBaseURL),
-			container.NewGridWithColumns(2,
-				settingsField("API Key", repAPIKey),
-				settingsField("视觉模型", repModel),
-			),
+		settingsCard("爆款复刻", "默认 ModelScope Qwen3-VL", settingsForm(
+			widget.NewLabel("Base URL"), repBaseURL,
+			widget.NewLabel("API Key"), repAPIKey,
+			widget.NewLabel("视觉模型"), repModel,
 		)),
-		widget.NewCard("链接下载", "抖音解析地址和 Key，可换成自己部署的实例", container.NewGridWithColumns(2,
-			settingsField("API 地址", dyBaseURL),
-			settingsField("API Key", dyAPIKey),
+		settingsCard("链接下载", "抖音解析地址和 Key，可换成自己部署的实例", settingsForm(
+			widget.NewLabel("API 地址"), dyBaseURL,
+			widget.NewLabel("API Key"), dyAPIKey,
 		)),
-		widget.NewCard("介绍片", "视频工作台密钥", container.NewVBox(
-			settingsField("视频 API Key", videoKey),
-			videoLinks,
-			videoHint,
+		settingsCard("介绍片", "额度与网页端共用", settingsForm(
+			widget.NewLabel("视频 API Key"), container.NewBorder(nil, nil, nil, videoLinks, videoKey),
 		)),
-		widget.NewCard("生图", "四视图使用，与视觉模型分开", container.NewVBox(
-			settingsField("Base URL", imgBaseURL),
-			container.NewGridWithColumns(2,
-				settingsField("API Key", imgAPIKey),
-				settingsField("模型", imgModel),
-			),
-			imageHint,
+		settingsCard("生图", "四视图使用；地址或密钥留空时沿用复刻设置", settingsForm(
+			widget.NewLabel("Base URL"), imgBaseURL,
+			widget.NewLabel("API Key"), imgAPIKey,
+			widget.NewLabel("模型"), imgModel,
 		)),
-		widget.NewCard("界面", "", hideCheck),
+		settingsCard("界面", "", hideCheck),
 		container.NewHBox(saveBtn),
 		status,
 		cfgPath,
-	)))
+	)
+	backdrop := canvas.NewRectangle(color.NRGBA{R: 0xd5, G: 0xde, B: 0xea, A: 0xff})
+	return container.NewStack(backdrop, container.NewVScroll(container.NewPadded(page)))
 }
 
-func settingsField(label string, obj fyne.CanvasObject) fyne.CanvasObject {
-	name := widget.NewLabel(label)
-	return container.NewVBox(name, obj)
+func settingsForm(items ...fyne.CanvasObject) fyne.CanvasObject {
+	return container.New(layout.NewFormLayout(), items...)
+}
+
+// settingsCard keeps the subtitle on the title row and paints a lighter fill
+// than the settings backdrop so each group reads as its own block.
+func settingsCard(title, subtitle string, body fyne.CanvasObject) fyne.CanvasObject {
+	titleLbl := widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	head := fyne.CanvasObject(titleLbl)
+	if strings.TrimSpace(subtitle) != "" {
+		sub := widget.NewLabel(subtitle)
+		sub.Importance = widget.LowImportance
+		sub.Truncation = fyne.TextTruncateEllipsis
+		sub.SizeName = theme.SizeNameCaptionText
+		head = container.NewBorder(nil, nil, titleLbl, nil, &looseWidth{CanvasObject: sub, minW: 24})
+	}
+	bg := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	bg.StrokeColor = color.NRGBA{R: 0x5c, G: 0x6d, B: 0x82, A: 0xff}
+	bg.StrokeWidth = 1
+	bg.CornerRadius = 8
+	return container.NewStack(bg, container.NewPadded(container.NewVBox(head, body)))
+}
+
+// looseWidth reports a small minimum width so a one-line subtitle can sit
+// after the title and ellipsize instead of stretching the page.
+type looseWidth struct {
+	fyne.CanvasObject
+	minW float32
+}
+
+func (l *looseWidth) MinSize() fyne.Size {
+	s := l.CanvasObject.MinSize()
+	return fyne.NewSize(l.minW, s.Height)
 }
 
 func saveProject(state *AppState) error {

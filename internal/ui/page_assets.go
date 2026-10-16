@@ -113,7 +113,7 @@ func newAssetsPage(state *AppState) (fyne.CanvasObject, func()) {
 	refresh := func() {
 		syncRows()
 		if state.Project == nil {
-			status.SetText("请先在「工程」打开或新建")
+			status.SetText("请先在「短剧解说」打开或新建")
 			return
 		}
 		status.SetText(fmt.Sprintf("%d 个视频，%d 个已匹配字幕",
