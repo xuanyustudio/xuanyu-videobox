@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -12,7 +13,7 @@ import (
 )
 
 var (
-	douyinMu     sync.RWMutex
+	douyinMu      sync.RWMutex
 	douyinAPIBase = "http://39.109.101.66:8000"
 	douyinAPIKey  = "dtk_0ebb3c9076ad_NVJtZ8xXbGvYWPi1GCkOuFx5hjGwFgZV"
 )
@@ -57,36 +58,12 @@ func (d *douyinParser) Parse(ctx context.Context, rawURL string) (*VideoInfo, er
 // Exported base/key parameters make this testable without touching globals.
 func (d *douyinParser) parseViaAPI(ctx context.Context, rawURL, apiBase, apiKey string) (*VideoInfo, error) {
 	payload, _ := json.Marshal(map[string]string{"url": rawURL})
-
 	endpoint := apiBase + "/api/v1/parse?wait=25"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("抖音: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", apiKey)
-
-	resp, err := defaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("抖音: 请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := readBodyLimit(resp.Body, 2*1024*1024)
+	raw, err := douyinDo(ctx, http.MethodPost, endpoint, apiBase, apiKey, bytes.NewReader(payload), 2*1024*1024)
 	if err != nil {
 		return nil, err
 	}
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		return d.extractFromBody(body)
-
-	case http.StatusAccepted:
-		return d.pollTask(ctx, body, apiBase, apiKey)
-
-	default:
-		return nil, d.parseAPIError(body, resp.StatusCode)
-	}
+	return d.extractMedia(raw)
 }
 
 // apiEnvelope is the outer JSON wrapper the API returns.
@@ -117,9 +94,44 @@ type apiTaskRef struct {
 type apiTaskPoll struct {
 	State  string          `json:"state"`
 	Result json.RawMessage `json:"result"`
+	Error  *apiError       `json:"error,omitempty"`
 }
 
-func (d *douyinParser) extractFromBody(body []byte) (*VideoInfo, error) {
+// douyinDo performs an authenticated call and returns the success payload.
+// HTTP 200 yields the envelope data. HTTP 202 polls /api/v1/tasks/{id} the
+// same way single-video parse does, and returns the task result.
+func douyinDo(ctx context.Context, method, endpoint, apiBase, apiKey string, body io.Reader, limit int64) (json.RawMessage, error) {
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	if err != nil {
+		return nil, fmt.Errorf("抖音: %w", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("X-API-Key", apiKey)
+
+	resp, err := defaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("抖音: 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := readBodyLimit(resp.Body, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return envelopeData(respBody)
+	case http.StatusAccepted:
+		return pollTaskResult(ctx, respBody, apiBase, apiKey, limit)
+	default:
+		return nil, (&douyinParser{}).parseAPIError(respBody, resp.StatusCode)
+	}
+}
+
+func envelopeData(body []byte) (json.RawMessage, error) {
 	var env apiEnvelope
 	if err := json.Unmarshal(body, &env); err != nil {
 		return nil, fmt.Errorf("抖音: 解析响应失败: %w", err)
@@ -127,42 +139,13 @@ func (d *douyinParser) extractFromBody(body []byte) (*VideoInfo, error) {
 	if env.Error != nil && env.Error.Message != "" {
 		return nil, fmt.Errorf("抖音: [%s] %s", env.Error.Code, env.Error.Message)
 	}
-
-	media, err := d.extractMedia(env.Data)
-	if err != nil {
-		return nil, err
+	if len(bytes.TrimSpace(env.Data)) == 0 || string(bytes.TrimSpace(env.Data)) == "null" {
+		return nil, fmt.Errorf("抖音: 响应中无数据")
 	}
-	return media, nil
+	return env.Data, nil
 }
 
-// extractMedia tries two layouts:
-//   1. data IS the content: data.media.video.url
-//   2. data has a nested task result: data.result.media.video.url
-func (d *douyinParser) extractMedia(raw json.RawMessage) (*VideoInfo, error) {
-	var m apiMedia
-	if err := json.Unmarshal(raw, &m); err == nil && m.Media.Video.URL != "" {
-		return &VideoInfo{
-			Platform: "douyin",
-			VideoURL: m.Media.Video.URL,
-			Title:    m.Title,
-		}, nil
-	}
-
-	var nested struct {
-		Result apiMedia `json:"result"`
-	}
-	if err := json.Unmarshal(raw, &nested); err == nil && nested.Result.Media.Video.URL != "" {
-		return &VideoInfo{
-			Platform: "douyin",
-			VideoURL: nested.Result.Media.Video.URL,
-			Title:    nested.Result.Title,
-		}, nil
-	}
-
-	return nil, fmt.Errorf("抖音: 响应中未找到视频地址")
-}
-
-func (d *douyinParser) pollTask(ctx context.Context, initialBody []byte, apiBase, apiKey string) (*VideoInfo, error) {
+func pollTaskResult(ctx context.Context, initialBody []byte, apiBase, apiKey string, limit int64) (json.RawMessage, error) {
 	var env apiEnvelope
 	if err := json.Unmarshal(initialBody, &env); err != nil {
 		return nil, fmt.Errorf("抖音: 解析 202 响应失败: %w", err)
@@ -173,7 +156,7 @@ func (d *douyinParser) pollTask(ctx context.Context, initialBody []byte, apiBase
 		return nil, fmt.Errorf("抖音: 202 响应中无 task_id")
 	}
 
-	pollURL := fmt.Sprintf("%s/api/v1/tasks/%s", apiBase, ref.TaskID)
+	pollURL := fmt.Sprintf("%s/api/v1/tasks/%s", strings.TrimRight(apiBase, "/"), ref.TaskID)
 
 	timeout := 120 * time.Second
 	deadline, cancel := context.WithTimeout(ctx, timeout)
@@ -197,7 +180,7 @@ func (d *douyinParser) pollTask(ctx context.Context, initialBody []byte, apiBase
 		if err != nil {
 			return nil, fmt.Errorf("抖音: 轮询请求失败: %w", err)
 		}
-		body, err := readBodyLimit(resp.Body, 2*1024*1024)
+		body, err := readBodyLimit(resp.Body, limit)
 		resp.Body.Close()
 		if err != nil {
 			return nil, err
@@ -207,7 +190,7 @@ func (d *douyinParser) pollTask(ctx context.Context, initialBody []byte, apiBase
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
-			return nil, d.parseAPIError(body, resp.StatusCode)
+			return nil, (&douyinParser{}).parseAPIError(body, resp.StatusCode)
 		}
 
 		var pollEnv apiEnvelope
@@ -225,13 +208,46 @@ func (d *douyinParser) pollTask(ctx context.Context, initialBody []byte, apiBase
 
 		switch task.State {
 		case "done":
-			return d.extractMedia(task.Result)
+			if len(bytes.TrimSpace(task.Result)) == 0 || string(bytes.TrimSpace(task.Result)) == "null" {
+				return nil, fmt.Errorf("抖音: 任务完成但没有结果")
+			}
+			return task.Result, nil
 		case "failed":
+			if task.Error != nil && task.Error.Message != "" {
+				return nil, fmt.Errorf("抖音: 任务失败: [%s] %s", task.Error.Code, task.Error.Message)
+			}
 			return nil, fmt.Errorf("抖音: 任务失败")
 		default:
 			continue
 		}
 	}
+}
+
+// extractMedia tries two layouts:
+//  1. data IS the content: data.media.video.url
+//  2. data has a nested task result: data.result.media.video.url
+func (d *douyinParser) extractMedia(raw json.RawMessage) (*VideoInfo, error) {
+	var m apiMedia
+	if err := json.Unmarshal(raw, &m); err == nil && m.Media.Video.URL != "" {
+		return &VideoInfo{
+			Platform: "douyin",
+			VideoURL: m.Media.Video.URL,
+			Title:    m.Title,
+		}, nil
+	}
+
+	var nested struct {
+		Result apiMedia `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &nested); err == nil && nested.Result.Media.Video.URL != "" {
+		return &VideoInfo{
+			Platform: "douyin",
+			VideoURL: nested.Result.Media.Video.URL,
+			Title:    nested.Result.Title,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("抖音: 响应中未找到视频地址")
 }
 
 func (d *douyinParser) parseAPIError(body []byte, status int) error {
