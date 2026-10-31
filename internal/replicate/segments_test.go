@@ -50,3 +50,13 @@ func TestPlanSegments(t *testing.T) {
 	spansEqual(t, replicate.PlanSegments(25, 10), []replicate.Span{{Start: 0, End: 10}, {Start: 10, End: 20}, {Start: 20, End: 25}})
 	spansEqual(t, replicate.PlanSegments(16, 12), []replicate.Span{{Start: 0, End: 15}, {Start: 15, End: 16}})
 }
+
+func TestSpanTimestamps(t *testing.T) {
+	got := replicate.SpanTimestamps(replicate.Span{Start: 15, End: 24}, 8)
+	if len(got) != 8 {
+		t.Fatalf("len=%d", len(got))
+	}
+	if math.Abs(got[0]-16) > 1e-9 || math.Abs(got[7]-23) > 1e-9 {
+		t.Fatalf("%v", got)
+	}
+}
