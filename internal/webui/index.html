@@ -430,12 +430,15 @@ function fillReplicatePick(res) {
   whole.value = 'all';
   whole.textContent = '整片';
   sel.appendChild(whole);
-  (res.segments || []).forEach((seg, i) => {
-    const opt = document.createElement('option');
-    opt.value = String(i);
-    opt.textContent = repSegmentLabel(seg);
-    sel.appendChild(opt);
-  });
+  const segs = res.segments || [];
+  if (segs.length > 1) {
+    segs.forEach((seg, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = repSegmentLabel(seg);
+      sel.appendChild(opt);
+    });
+  }
   sel.value = 'all';
 }
 
