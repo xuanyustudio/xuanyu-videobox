@@ -1,7 +1,9 @@
 package replicate_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/narratoai/narrato-go/internal/media"
@@ -225,32 +228,26 @@ func TestValidate(t *testing.T) {
 
 // TestRunEndToEnd uses real ffmpeg (skipped if absent) and a fake vision API.
 func TestRunEndToEnd(t *testing.T) {
-	ffmpeg, err := media.ResolveFFmpeg("", "")
-	if err != nil {
-		t.Skip(err)
-	}
-	ffprobe, _ := media.ResolveFFprobe("", "")
-	dir := t.TempDir()
-	video := filepath.Join(dir, "in.mp4")
-	cmd := exec.Command(ffmpeg, "-y", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=10:duration=3", "-pix_fmt", "yuv420p", video)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Skipf("cannot synthesize test video: %v %s", err, out)
-	}
+	dir, video, bins := synthesizeLavfi(t, 3)
 
-	var got captured
-	srv := fakeServer(t, &got, http.StatusOK, sampleReply)
+	srv, reqs := recordVision(t, []string{sampleReply})
 	defer srv.Close()
 
 	var last int
+	var msgs []string
 	res, err := replicate.Run(context.Background(), replicate.Params{
 		VideoPath: video,
 		OutputDir: filepath.Join(dir, "out"),
 		Frames:    4,
 		BaseURL:   srv.URL,
 		APIKey:    "k",
-		Bins:      media.FFmpegBins{FFmpeg: ffmpeg, FFprobe: ffprobe},
-		OnProgress: func(p int, _ string) {
+		Bins:      bins,
+		Transcribe: func(_, outPath string) error {
+			return os.WriteFile(outPath, []byte("1\n00:00:00,000 --> 00:00:01,000\n你好\n\n"), 0o644)
+		},
+		OnProgress: func(p int, msg string) {
 			last = p
+			msgs = append(msgs, msg)
 		},
 	})
 	if err != nil {
@@ -270,14 +267,279 @@ func TestRunEndToEnd(t *testing.T) {
 			t.Fatalf("missing %s: %v", name, err)
 		}
 	}
+	if _, err := os.Stat(filepath.Join(dir, "out", "character_ref.jpg")); !os.IsNotExist(err) {
+		t.Fatalf("character_ref.jpg should not exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out", "segment_01")); !os.IsNotExist(err) {
+		t.Fatalf("segment_01 should not exist: %v", err)
+	}
+	zh, err := os.ReadFile(filepath.Join(dir, "out", replicate.PromptZHFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(zh), "【锁定形象】") {
+		t.Fatalf("single-segment prompt has lock header: %q", zh)
+	}
+	if !strings.Contains(strings.Join(msgs, "\n"), "字幕") {
+		t.Fatalf("progress messages: %q", msgs)
+	}
+	gotReqs := *reqs
+	if len(gotReqs) != 1 {
+		t.Fatalf("vision calls=%d", len(gotReqs))
+	}
+	got := gotReqs[0]
 	var parts []json.RawMessage
 	_ = json.Unmarshal(got.Body.Messages[1].Content, &parts)
 	if len(parts) != 5 {
 		t.Fatalf("expected 1 text + 4 images, got %d", len(parts))
+	}
+	var textPart struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(parts[0], &textPart); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(textPart.Text, "你好") {
+		t.Fatalf("user text: %q", textPart.Text)
 	}
 	var sys string
 	_ = json.Unmarshal(got.Body.Messages[0].Content, &sys)
 	if sys != replicate.SystemPrompt(replicate.TemplateStandard) {
 		t.Fatal("standard system prompt expected by default")
 	}
+}
+
+func TestRunUsesSubtitleFailure(t *testing.T) {
+	dir, video, bins := synthesizeLavfi(t, 3)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	_, err := replicate.Run(context.Background(), replicate.Params{
+		VideoPath: video,
+		OutputDir: filepath.Join(dir, "out"),
+		Frames:    2,
+		BaseURL:   srv.URL,
+		APIKey:    "k",
+		Bins:      bins,
+		Transcribe: func(_, _ string) error {
+			return fmt.Errorf("连不上")
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "字幕提取失败") {
+		t.Fatalf("err=%v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("vision calls=%d", calls)
+	}
+}
+
+func TestRunLongVideoSegments(t *testing.T) {
+	dir, video, bins := synthesizeLavfi(t, 20)
+	lockReply := "## 锁定形象 (中文)\n```\n黑发。\n```\n\n## 锁定形象 (English)\n```\nBlack hair.\n```\n"
+	srv, reqs := recordVision(t, []string{lockReply, sampleReply, sampleReply})
+	defer srv.Close()
+
+	var msgs []string
+	res, err := replicate.Run(context.Background(), replicate.Params{
+		VideoPath:  video,
+		OutputDir:  filepath.Join(dir, "out"),
+		Frames:     2,
+		SegmentSec: 15,
+		BaseURL:    srv.URL,
+		APIKey:     "k",
+		Bins:       bins,
+		Transcribe: func(_, outPath string) error {
+			body := "1\n00:00:01,000 --> 00:00:02,000\n早句\n\n2\n00:00:14,500 --> 00:00:15,500\n跨句\n\n"
+			return os.WriteFile(outPath, []byte(body), 0o644)
+		},
+		OnProgress: func(_ int, msg string) {
+			msgs = append(msgs, msg)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := *reqs
+	if len(got) != 3 {
+		t.Fatalf("vision calls=%d", len(got))
+	}
+	lockSys, lockUser := replicate.LockPrompts()
+	text, images := userVision(t, got[0])
+	var sys string
+	if err := json.Unmarshal(got[0].Body.Messages[0].Content, &sys); err != nil {
+		t.Fatal(err)
+	}
+	if sys != lockSys || text != lockUser {
+		t.Fatalf("lock sys=%q user=%q", sys, text)
+	}
+	if len(images) != 2 {
+		t.Fatalf("lock images=%d, want one per segment", len(images))
+	}
+	if strings.Contains(text, "早句") || strings.Contains(text, "跨句") {
+		t.Fatal("lock request included segment subtitles")
+	}
+
+	ref, err := os.ReadFile(filepath.Join(dir, "out", "character_ref.jpg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Segments) != 2 || res.Segments[1].StartSec != 15 {
+		t.Fatalf("segments=%+v", res.Segments)
+	}
+	for i, req := range got[1:] {
+		text, images := userVision(t, req)
+		if !strings.Contains(text, "跨句") || !strings.Contains(text, "黑发。") {
+			t.Fatalf("analysis %d text=%q", i, text)
+		}
+		hasEarly := strings.Contains(text, "早句")
+		if i == 0 && !hasEarly {
+			t.Fatal("first analysis missing 早句")
+		}
+		if i == 1 && hasEarly {
+			t.Fatal("second analysis includes 早句")
+		}
+		if len(images) != len(res.Segments[i].Frames)+1 {
+			t.Fatalf("analysis %d images=%d frames=%d", i, len(images), len(res.Segments[i].Frames))
+		}
+		if !bytes.Equal(decodeDataJPEG(t, images[0]), ref) {
+			t.Fatalf("analysis %d first image is not character_ref.jpg", i)
+		}
+		var segSys string
+		if err := json.Unmarshal(req.Body.Messages[0].Content, &segSys); err != nil {
+			t.Fatal(err)
+		}
+		if segSys != replicate.SystemPrompt(replicate.TemplateStandard) {
+			t.Fatalf("analysis %d system prompt", i)
+		}
+	}
+	for _, name := range []string{"segment_01", "segment_02"} {
+		b, err := os.ReadFile(filepath.Join(dir, "out", name, replicate.PromptZHFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(string(b), "【锁定形象】\n黑发。") {
+			t.Fatalf("%s prompt_zh=%q", name, b)
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, "out", name, "analysis.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "【锁定形象】") {
+			t.Fatalf("%s analysis.md includes lock: %q", name, raw)
+		}
+	}
+	rootZH, err := os.ReadFile(filepath.Join(dir, "out", replicate.PromptZHFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(rootZH), "【锁定形象】") != 1 || !strings.Contains(string(rootZH), "第 2 段") {
+		t.Fatalf("root zh=%q", rootZH)
+	}
+	srt, err := os.ReadFile(filepath.Join(dir, "out", "subtitles.srt"))
+	if err != nil || !strings.Contains(string(srt), "跨句") {
+		t.Fatalf("srt err=%v body=%q", err, srt)
+	}
+	analysis, err := os.ReadFile(filepath.Join(dir, "out", replicate.AnalysisFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(analysis), "【锁定形象】") {
+		t.Fatalf("analysis=%q", analysis)
+	}
+	joined := strings.Join(msgs, "\n")
+	if !strings.Contains(joined, "字幕") || !strings.Contains(joined, "锁定形象") || !strings.Contains(joined, "第 2 段") {
+		t.Fatalf("progress messages: %q", msgs)
+	}
+}
+
+func synthesizeLavfi(t *testing.T, seconds int) (dir, video string, bins media.FFmpegBins) {
+	t.Helper()
+	ffmpeg, err := media.ResolveFFmpeg("", "")
+	if err != nil {
+		t.Skip(err)
+	}
+	ffprobe, _ := media.ResolveFFprobe("", "")
+	dir = t.TempDir()
+	video = filepath.Join(dir, "in.mp4")
+	cmd := exec.Command(ffmpeg, "-y", "-f", "lavfi", "-i", fmt.Sprintf("testsrc=size=160x120:rate=10:duration=%d", seconds), "-pix_fmt", "yuv420p", video)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("cannot synthesize test video: %v %s", err, out)
+	}
+	return dir, video, media.FFmpegBins{FFmpeg: ffmpeg, FFprobe: ffprobe}
+}
+
+func recordVision(t *testing.T, replies []string) (*httptest.Server, *[]captured) {
+	t.Helper()
+	var mu sync.Mutex
+	var got []captured
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var c captured
+		c.Auth = r.Header.Get("Authorization")
+		c.Path = r.URL.Path
+		data, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(data, &c.Body); err != nil {
+			t.Errorf("bad request json: %v", err)
+		}
+		mu.Lock()
+		got = append(got, c)
+		n := len(got)
+		mu.Unlock()
+		reply := sampleReply
+		if n-1 < len(replies) {
+			reply = replies[n-1]
+		}
+		w.WriteHeader(http.StatusOK)
+		out, _ := json.Marshal(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": reply}}},
+		})
+		_, _ = w.Write(out)
+	}))
+	return srv, &got
+}
+
+func userVision(t *testing.T, c captured) (text string, images []string) {
+	t.Helper()
+	var raw json.RawMessage
+	for _, m := range c.Body.Messages {
+		if m.Role == "user" {
+			raw = m.Content
+			break
+		}
+	}
+	var parts []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		ImageURL struct {
+			URL string `json:"url"`
+		} `json:"image_url"`
+	}
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		t.Fatalf("user content: %v", err)
+	}
+	for _, p := range parts {
+		switch p.Type {
+		case "text":
+			text = p.Text
+		case "image_url":
+			images = append(images, p.ImageURL.URL)
+		}
+	}
+	return text, images
+}
+
+func decodeDataJPEG(t *testing.T, dataURL string) []byte {
+	t.Helper()
+	const pfx = "data:image/jpeg;base64,"
+	if !strings.HasPrefix(dataURL, pfx) {
+		t.Fatalf("image url: %.48q", dataURL)
+	}
+	b, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(dataURL, pfx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
