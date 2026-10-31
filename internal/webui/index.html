@@ -21,6 +21,7 @@
   input, textarea, select { width:100%; padding:8px 10px; border-radius:8px; border:1px solid #334155; background:#0f1724; color:var(--text); }
   textarea { min-height:120px; font-family:ui-monospace, Consolas, monospace; font-size:12px; }
   .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .row.cols-3 { grid-template-columns:1fr 1fr 1fr; }
   .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
   button.primary { background:var(--accent); color:#fff; border:0; padding:9px 14px; border-radius:8px; cursor:pointer; }
   button.ghost { background:#243044; color:var(--text); border:0; padding:9px 14px; border-radius:8px; cursor:pointer; }
@@ -115,12 +116,19 @@
   <section id="replicate">
     <label>短视频路径（绝对路径）</label>
     <input id="repVideo" placeholder="E:\videos\sample.mp4"/>
-    <div class="row">
+    <div class="row cols-3">
       <div>
         <label>关键帧数</label>
         <select id="repFrames">
           <option>4</option><option>6</option><option selected>8</option><option>10</option>
           <option>12</option><option>14</option><option>16</option>
+        </select>
+      </div>
+      <div>
+        <label>分段时长</label>
+        <select id="repSegmentSec">
+          <option value="10">10 秒</option>
+          <option value="15" selected>15 秒</option>
         </select>
       </div>
       <div>
@@ -139,6 +147,8 @@
       <button class="ghost" onclick="clearReplicate()">清空</button>
     </div>
     <p class="hint" id="repHint">视觉模型在「设置」中配置（默认 ModelScope Qwen3-VL）；结果保存在视频同目录 replicate_时间戳/ 下</p>
+    <label>查看</label>
+    <select id="repSegmentPick"></select>
     <label>提取的关键帧</label>
     <div class="frames" id="repFramesView"></div>
     <label>SORA2 提示词（可修改后复制使用）</label>
@@ -204,6 +214,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let state = null;
+let repLast = null;
 
 document.querySelectorAll('nav button').forEach(btn => {
   btn.onclick = () => {
@@ -235,6 +246,7 @@ function fillSettings(cfg, cfgPath, root) {
   $('repBaseUrl').value = cfg.replicate?.base_url || '';
   $('repApiKey').value = cfg.replicate?.api_key || '';
   $('repModel').value = cfg.replicate?.model || '';
+  $('repSegmentSec').value = cfg.replicate?.segment_sec === 10 ? '10' : '15';
   $('cfgPath').textContent = '配置文件: ' + cfgPath;
   $('projRoot').textContent = '工程目录: ' + root;
   if ($('linkdlOutDir') && !$('linkdlOutDir').value) $('linkdlOutDir').value = root || '';
@@ -344,7 +356,8 @@ async function saveSettings() {
       base_url: $('repBaseUrl').value.trim(),
       api_key: $('repApiKey').value.trim(),
       model: $('repModel').value.trim(),
-      frames: state?.cfg?.replicate?.frames || 8
+      frames: state?.cfg?.replicate?.frames || 8,
+      segment_sec: +$('repSegmentSec').value || 15
     }
   };
   await api('/api/save_settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
@@ -377,20 +390,21 @@ async function runReplicate() {
   try {
     const res = await api('/api/replicate/run', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ video, frames: +$('repFrames').value || 8, template: $('repTemplate').value })
+      body: JSON.stringify({
+        video,
+        frames: +$('repFrames').value || 8,
+        template: $('repTemplate').value,
+        segment_sec: +$('repSegmentSec').value || 15
+      })
     });
-    const view = $('repFramesView');
-    view.innerHTML = '';
-    const t = Date.now();
-    for (let i = 0; i < res.frames; i++) {
-      const img = document.createElement('img');
-      img.src = '/api/replicate/frame?i=' + i + '&t=' + t;
-      view.appendChild(img);
+    repLast = res;
+    fillReplicatePick(res);
+    applyReplicateView();
+    if ((res.segments || []).length > 1 && res.character_ref) {
+      $('repHint').textContent = '完成 · 各段提示词共用同一锁定形象。到即梦或 Sora 分段生成时，请每一段都上传 ' + res.character_ref;
+    } else {
+      $('repHint').textContent = `完成 · ${res.frames} 张关键帧 · 已保存到 ${res.output_dir}`;
     }
-    $('repPrompt').value = res.prompt_en || res.prompt || '';
-    $('repPromptZh').value = res.prompt_zh || '';
-    $('repAnalysis').value = res.analysis || '';
-    $('repHint').textContent = `完成 · ${res.frames} 张关键帧 · 已保存到 ${res.output_dir}`;
   } catch (e) {
     $('repHint').textContent = '失败';
     alert(e.message || e);
@@ -403,11 +417,68 @@ async function openReplicateOut() {
   try { await api('/api/replicate/open', { method:'POST' }); } catch (e) { alert(e.message || e); }
 }
 
+function repSegmentLabel(seg) {
+  const start = Number(seg.start_sec).toFixed(1);
+  const end = Number(seg.end_sec).toFixed(1);
+  return `第 ${seg.index} 段 · ${start}–${end} 秒`;
+}
+
+function fillReplicatePick(res) {
+  const sel = $('repSegmentPick');
+  sel.innerHTML = '';
+  const whole = document.createElement('option');
+  whole.value = 'all';
+  whole.textContent = '整片';
+  sel.appendChild(whole);
+  (res.segments || []).forEach((seg, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = repSegmentLabel(seg);
+    sel.appendChild(opt);
+  });
+  sel.value = 'all';
+}
+
+function applyReplicateView() {
+  const res = repLast;
+  const view = $('repFramesView');
+  view.innerHTML = '';
+  if (!res) return;
+  let en = res.prompt_en || res.prompt || '';
+  let zh = res.prompt_zh || '';
+  let analysis = res.analysis || '';
+  let start = 0;
+  let count = res.frames || 0;
+  const pick = $('repSegmentPick').value;
+  if (pick !== '' && pick !== 'all') {
+    const seg = (res.segments || [])[Number(pick)];
+    if (!seg) return;
+    en = seg.prompt_en || '';
+    zh = seg.prompt_zh || '';
+    analysis = seg.analysis || '';
+    start = Number(seg.frame_start) || 0;
+    count = Number(seg.frame_count) || 0;
+  }
+  const t = Date.now();
+  for (let i = 0; i < count; i++) {
+    const img = document.createElement('img');
+    img.src = '/api/replicate/frame?i=' + (start + i) + '&t=' + t;
+    view.appendChild(img);
+  }
+  $('repPrompt').value = en;
+  $('repPromptZh').value = zh;
+  $('repAnalysis').value = analysis;
+}
+
 function clearReplicate() {
+  repLast = null;
   $('repVideo').value = '';
   $('repFramesView').innerHTML = '';
+  $('repSegmentPick').innerHTML = '';
   ['repPrompt', 'repPromptZh', 'repAnalysis'].forEach(id => $(id).value = '');
 }
+
+$('repSegmentPick').onchange = applyReplicateView;
 
 document.querySelectorAll('#repPromptTabs button').forEach(btn => {
   btn.onclick = () => {
