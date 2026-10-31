@@ -2,6 +2,7 @@ package replicate
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -84,6 +85,9 @@ func CuesForSpan(cues []Cue, span Span) []Cue {
 			out = append(out, c)
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Start < out[j].Start
+	})
 	return out
 }
 

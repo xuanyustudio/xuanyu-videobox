@@ -22,7 +22,7 @@ func TestParseSRTAndAssign(t *testing.T) {
 	if len(first) != 3 || first[0].Text != "你好" || first[1].Text != "正好结束" || first[2].Text != "跨过去" {
 		t.Fatalf("first=%+v", first)
 	}
-	if len(second) != 3 || second[0].Text != "正好开始" || second[1].Text != "跨过去" || second[2].Text != "后一段" {
+	if len(second) != 3 || second[0].Text != "跨过去" || second[1].Text != "正好开始" || second[2].Text != "后一段" {
 		t.Fatalf("second=%+v", second)
 	}
 	if math.Abs(first[2].Start-14.5) > 1e-9 || math.Abs(first[2].End-15.5) > 1e-9 {
