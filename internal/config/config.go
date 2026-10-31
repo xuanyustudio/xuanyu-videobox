@@ -56,10 +56,11 @@ type UI struct {
 // Replicate holds 爆款复刻 settings: an OpenAI-compatible vision model
 // (default ModelScope Qwen3-VL, aligned with Python QWEN_API_BASE_URL / QWEN_API_KEY / QWEN_MODEL_ID).
 type Replicate struct {
-	BaseURL string `yaml:"base_url" json:"base_url"`
-	APIKey  string `yaml:"api_key" json:"api_key"`
-	Model   string `yaml:"model" json:"model"`
-	Frames  int    `yaml:"frames" json:"frames"` // keyframes sampled per video
+	BaseURL    string `yaml:"base_url" json:"base_url"`
+	APIKey     string `yaml:"api_key" json:"api_key"`
+	Model      string `yaml:"model" json:"model"`
+	Frames     int    `yaml:"frames" json:"frames"`           // keyframes sampled per video
+	SegmentSec int    `yaml:"segment_sec" json:"segment_sec"` // 10 or 15
 }
 
 // Douyin holds the self-hosted Douyin_TikTok_Download_API connection info.
@@ -108,9 +109,10 @@ func Default() *Config {
 			ProjectsRoot: defaultProjectsRoot(),
 		},
 		Replicate: Replicate{
-			BaseURL: "https://api-inference.modelscope.cn/v1",
-			Model:   "Qwen/Qwen3-VL-8B-Instruct",
-			Frames:  8,
+			BaseURL:    "https://api-inference.modelscope.cn/v1",
+			Model:      "Qwen/Qwen3-VL-8B-Instruct",
+			Frames:     8,
+			SegmentSec: 15,
 		},
 		Douyin: Douyin{
 			BaseURL: "http://39.109.101.66:8000",

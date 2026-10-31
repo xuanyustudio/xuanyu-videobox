@@ -59,12 +59,16 @@ func TestReplicateDefaultsAndRoundTrip(t *testing.T) {
 	if cfg.Replicate.BaseURL == "" || cfg.Replicate.Model == "" || cfg.Replicate.Frames != 8 {
 		t.Fatalf("replicate defaults: %#v", cfg.Replicate)
 	}
+	if cfg.Replicate.SegmentSec != 15 {
+		t.Fatalf("replicate segment_sec default: %#v", cfg.Replicate)
+	}
 	if cfg.Replicate.APIKey != "" {
 		t.Fatal("replicate api key must not have a default")
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	cfg.Replicate.APIKey = "ms-test"
 	cfg.Replicate.Frames = 12
+	cfg.Replicate.SegmentSec = 10
 	if err := config.Save(path, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +76,7 @@ func TestReplicateDefaultsAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Replicate.APIKey != "ms-test" || got.Replicate.Frames != 12 {
+	if got.Replicate.APIKey != "ms-test" || got.Replicate.Frames != 12 || got.Replicate.SegmentSec != 10 {
 		t.Fatalf("got %#v", got.Replicate)
 	}
 }
