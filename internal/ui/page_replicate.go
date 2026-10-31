@@ -16,9 +16,17 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/narratoai/narrato-go/internal/asr"
+	"github.com/narratoai/narrato-go/internal/config"
 	"github.com/narratoai/narrato-go/internal/media"
 	"github.com/narratoai/narrato-go/internal/replicate"
 )
+
+const replicateWholeView = "整片"
+
+func replicateSegmentLabel(seg replicate.SegmentResult) string {
+	return fmt.Sprintf("第 %d 段 · %.1f–%.1f秒", seg.Index, seg.StartSec, seg.EndSec)
+}
 
 func newReplicatePage(state *AppState) fyne.CanvasObject {
 	videoPath := ""
@@ -34,14 +42,15 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 	videoLabel.Truncation = fyne.TextTruncateEllipsis
 
 	status := widget.NewLabel("")
-	status.Truncation = fyne.TextTruncateEllipsis
+	status.Wrapping = fyne.TextWrapWord
 	status.Importance = widget.LowImportance
 	progress := widget.NewProgressBar()
 	progress.Min = 0
 	progress.Max = 100
 	progress.SetValue(0)
 
-	subtitle := widget.NewLabel("上传短视频 → 均匀抽取关键帧 → 视觉模型生成 SORA2 复刻提示词（中英文）")
+	subtitle := widget.NewLabel("上传视频，按 10 或 15 秒分段抽帧；先提取整片字幕，再逐段生成提示词。")
+	subtitle.Wrapping = fyne.TextWrapWord
 	subtitle.Importance = widget.LowImportance
 
 	frameOpts := []string{}
@@ -54,6 +63,13 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 		framesSelect.SetSelected(strconv.Itoa(replicate.DefaultFrames))
 	}
 
+	segOpts := []string{"10", "15"}
+	segSelect := widget.NewSelect(segOpts, nil)
+	segSelect.SetSelected(strconv.Itoa(replicate.NormalizeSegmentSec(state.Cfg.Replicate.SegmentSec)))
+	if segSelect.Selected == "" {
+		segSelect.SetSelected("15")
+	}
+
 	tplLabels := []string{}
 	for _, o := range replicate.TemplateOptions() {
 		tplLabels = append(tplLabels, o.Label)
@@ -64,6 +80,7 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 	const thumbW, thumbH float32 = 150, 90
 	framesGrid := container.NewGridWrap(fyne.NewSize(thumbW, thumbH))
 	framesHint := widget.NewLabel("提取后在此预览关键帧")
+	framesHint.Wrapping = fyne.TextWrapWord
 	framesHint.Importance = widget.LowImportance
 
 	promptEnEntry := widget.NewMultiLineEntry()
@@ -87,30 +104,67 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 	analysisEntry.SetMinRowsVisible(10)
 	analysisEntry.Disable()
 
-	showResult := func(res *replicate.Result) {
-		framesGrid.Objects = nil
+	var applyView func(*replicate.Result, string)
+	resultSelect := widget.NewSelect([]string{replicateWholeView}, func(choice string) {
+		if applyView != nil {
+			applyView(last, choice)
+		}
+	})
+	resultSelect.SetSelected(replicateWholeView)
+
+	applyView = func(res *replicate.Result, choice string) {
+		var frames []string
+		en, zh, analysis := "", "", ""
+		hint := "提取后在此预览关键帧"
 		if res != nil {
-			for _, f := range res.Frames {
-				img := canvas.NewImageFromFile(f)
-				img.FillMode = canvas.ImageFillContain
-				img.SetMinSize(fyne.NewSize(thumbW, thumbH))
-				framesGrid.Add(img)
-			}
-			framesHint.SetText(fmt.Sprintf("共 %d 张关键帧 · 已保存到 %s", len(res.Frames), res.OutputDir))
-			en := res.PromptEN
+			frames = res.Frames
+			en = res.PromptEN
 			if en == "" {
 				en = res.Prompt
 			}
-			promptEnEntry.SetText(en)
-			promptZhEntry.SetText(res.PromptZH)
-			analysisEntry.SetText(res.Analysis)
-		} else {
-			framesHint.SetText("提取后在此预览关键帧")
-			promptEnEntry.SetText("")
-			promptZhEntry.SetText("")
-			analysisEntry.SetText("")
+			zh = res.PromptZH
+			analysis = res.Analysis
+			if choice != replicateWholeView {
+				for _, seg := range res.Segments {
+					if replicateSegmentLabel(seg) != choice {
+						continue
+					}
+					frames = seg.Frames
+					en = seg.PromptEN
+					zh = seg.PromptZH
+					analysis = seg.Analysis
+					break
+				}
+			}
+			hint = fmt.Sprintf("共 %d 张关键帧 · 已保存到 %s", len(frames), res.OutputDir)
 		}
+		framesGrid.Objects = nil
+		for _, f := range frames {
+			img := canvas.NewImageFromFile(f)
+			img.FillMode = canvas.ImageFillContain
+			img.SetMinSize(fyne.NewSize(thumbW, thumbH))
+			framesGrid.Add(img)
+		}
+		framesHint.SetText(hint)
+		promptEnEntry.SetText(en)
+		promptZhEntry.SetText(zh)
+		analysisEntry.SetText(analysis)
 		framesGrid.Refresh()
+	}
+
+	showResult := func(res *replicate.Result) {
+		opts := []string{replicateWholeView}
+		if res != nil && len(res.Segments) >= 2 {
+			for _, seg := range res.Segments {
+				opts = append(opts, replicateSegmentLabel(seg))
+			}
+		}
+		cb := resultSelect.OnChanged
+		resultSelect.OnChanged = nil
+		resultSelect.SetOptions(opts)
+		resultSelect.SetSelected(replicateWholeView)
+		resultSelect.OnChanged = cb
+		applyView(res, replicateWholeView)
 	}
 
 	openOutBtn := widget.NewButton("打开输出", nil)
@@ -194,13 +248,23 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 			return
 		}
 		frames, _ := strconv.Atoi(framesSelect.Selected)
+		segSec, _ := strconv.Atoi(segSelect.Selected)
 		params := replicate.Params{
-			VideoPath: videoPath,
-			Frames:    frames,
-			Template:  replicate.TemplateByLabel(tplSelect.Selected),
-			BaseURL:   state.Cfg.Replicate.BaseURL,
-			APIKey:    state.Cfg.Replicate.APIKey,
-			Model:     state.Cfg.Replicate.Model,
+			VideoPath:  videoPath,
+			Frames:     frames,
+			Template:   replicate.TemplateByLabel(tplSelect.Selected),
+			BaseURL:    state.Cfg.Replicate.BaseURL,
+			APIKey:     state.Cfg.Replicate.APIKey,
+			Model:      state.Cfg.Replicate.Model,
+			SegmentSec: segSec,
+			ASR: asr.Options{
+				Backend:       state.Cfg.ASR.Backend,
+				APIURL:        state.Cfg.ASR.APIURL,
+				FireRedAPIURL: state.Cfg.ASR.FireRedAPIURL,
+				BailianAPIKey: state.Cfg.ASR.APIKey,
+				Hotword:       state.Cfg.ASR.Hotword,
+				EnableSpk:     state.Cfg.ASR.EnableSpk,
+			},
 			Bins: media.FFmpegBins{
 				FFmpeg:  state.Cfg.FFmpeg.Path,
 				FFprobe: state.Cfg.FFmpeg.FFprobePath,
@@ -227,6 +291,10 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 		progress.SetValue(5)
 		status.SetText("分析中…")
 		state.Log.Append("[爆款复刻] " + videoPath)
+		state.Cfg.Replicate.SegmentSec = replicate.NormalizeSegmentSec(segSec)
+		if err := config.Save(state.CfgPath, state.Cfg); err != nil {
+			state.Log.Append("[爆款复刻] 保存分段时长失败: " + err.Error())
+		}
 
 		go func() {
 			res, err := replicate.Run(ctx, params)
@@ -251,7 +319,11 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 				}
 				progress.SetValue(100)
 				showResult(res)
-				status.SetText("完成 · " + res.OutputDir)
+				if len(res.Segments) >= 2 {
+					status.SetText("完成 · 各段提示词已写入同一段锁定形象。到即梦或 Sora 分段生成时，请每一段都上传 " + res.CharacterRef)
+				} else {
+					status.SetText("完成 · " + res.OutputDir)
+				}
 				state.Log.Append("[爆款复刻] 完成: " + res.OutputDir)
 			})
 		}()
@@ -275,6 +347,7 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 	toolbar := container.NewHBox(pickVideoBtn, startBtn, cancelBtn, openOutBtn, clearBtn)
 	optsRow := container.NewHBox(
 		widget.NewLabel("关键帧数"), framesSelect,
+		widget.NewLabel("分段时长"), segSelect,
 		widget.NewLabel("提示词模板"), tplSelect,
 	)
 	modelHint := widget.NewLabel("视觉模型在「设置」中配置（默认 ModelScope Qwen3-VL）；结果保存在视频同目录 replicate_时间戳/ 下")
@@ -292,6 +365,7 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 		status,
 		optsRow,
 		modelHint,
+		container.NewHBox(widget.NewLabel("查看"), resultSelect),
 		sec("关键帧"),
 		framesHint,
 		framesGrid,
