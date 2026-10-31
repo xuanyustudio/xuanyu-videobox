@@ -41,4 +41,10 @@ func TestIndexHasReplicateTab(t *testing.T) {
 	if !strings.Contains(indexHTML, `value="seedance2"`) {
 		t.Fatal("index.html missing Seedance 2.0 template option")
 	}
+	if !strings.Contains(indexHTML, `id="repSegmentSec"`) {
+		t.Fatal("index.html missing segment length select")
+	}
+	if !strings.Contains(indexHTML, `<option value="10">10 秒</option>`) || !strings.Contains(indexHTML, `<option value="15" selected>15 秒</option>`) {
+		t.Fatal("index.html missing 10 second option or selected 15 second option")
+	}
 }

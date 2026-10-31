@@ -37,6 +37,15 @@ func FrameTimestamps(durationSec float64, n int) []float64 {
 	return out
 }
 
+// SpanTimestamps samples n points inside span and shifts them onto the source timeline.
+func SpanTimestamps(span Span, n int) []float64 {
+	local := FrameTimestamps(span.End-span.Start, n)
+	for i := range local {
+		local[i] += span.Start
+	}
+	return local
+}
+
 // ExtractFrames samples n JPEG keyframes into outDir as frame_000.jpg … and returns
 // their paths plus the probed duration (0 if unknown). Frames that fail are skipped.
 func ExtractFrames(ctx context.Context, bins media.FFmpegBins, videoPath string, n int, outDir string, progress func(int, string)) ([]string, float64, error) {
@@ -84,4 +93,45 @@ func ExtractFrames(ctx context.Context, bins media.FFmpegBins, videoPath string,
 		return nil, dur, fmt.Errorf("无法提取视频帧，请确保已安装 ffmpeg")
 	}
 	return frames, dur, nil
+}
+
+// ExtractSpanFrames writes frame_000.jpg… for one span into outDir.
+func ExtractSpanFrames(ctx context.Context, bins media.FFmpegBins, videoPath string, span Span, n int, outDir string, progress func(int, string)) ([]string, error) {
+	if progress == nil {
+		progress = func(int, string) {}
+	}
+	if bins.FFmpeg == "" {
+		bin, err := media.ResolveFFmpeg("", "")
+		if err != nil {
+			return nil, fmt.Errorf("未找到 ffmpeg: %w", err)
+		}
+		bins.FFmpeg = bin
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return nil, err
+	}
+	q := fmt.Sprintf("%d", (100-frameQuality)/10+1)
+	var frames []string
+	stamps := SpanTimestamps(span, n)
+	for i, ts := range stamps {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		out := filepath.Join(outDir, fmt.Sprintf("frame_%03d.jpg", i))
+		_, err := media.Run(ctx, bins.FFmpeg,
+			"-y",
+			"-ss", fmt.Sprintf("%.3f", ts),
+			"-i", videoPath,
+			"-vframes", "1",
+			"-q:v", q,
+			out,
+		)
+		if err != nil {
+			continue
+		}
+		if st, err := os.Stat(out); err == nil && st.Size() > 0 {
+			frames = append(frames, out)
+		}
+	}
+	return frames, nil
 }

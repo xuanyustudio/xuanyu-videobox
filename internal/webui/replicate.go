@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/narratoai/narrato-go/internal/asr"
+	"github.com/narratoai/narrato-go/internal/config"
 	"github.com/narratoai/narrato-go/internal/media"
 	"github.com/narratoai/narrato-go/internal/replicate"
 )
@@ -17,9 +19,10 @@ func (s *server) handleReplicateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Video    string `json:"video"`
-		Frames   int    `json:"frames"`
-		Template string `json:"template"`
+		Video      string `json:"video"`
+		Frames     int    `json:"frames"`
+		Template   string `json:"template"`
+		SegmentSec int    `json:"segment_sec"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), 400)
@@ -41,12 +44,21 @@ func (s *server) handleReplicateRun(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	params := replicate.Params{
-		VideoPath: strings.Trim(strings.TrimSpace(body.Video), `"`),
-		Frames:    body.Frames,
-		Template:  replicate.Template(body.Template),
-		BaseURL:   cfg.Replicate.BaseURL,
-		APIKey:    cfg.Replicate.APIKey,
-		Model:     cfg.Replicate.Model,
+		VideoPath:  strings.Trim(strings.TrimSpace(body.Video), `"`),
+		Frames:     body.Frames,
+		Template:   replicate.Template(body.Template),
+		BaseURL:    cfg.Replicate.BaseURL,
+		APIKey:     cfg.Replicate.APIKey,
+		Model:      cfg.Replicate.Model,
+		SegmentSec: body.SegmentSec,
+		ASR: asr.Options{
+			Backend:       cfg.ASR.Backend,
+			APIURL:        cfg.ASR.APIURL,
+			FireRedAPIURL: cfg.ASR.FireRedAPIURL,
+			BailianAPIKey: cfg.ASR.APIKey,
+			Hotword:       cfg.ASR.Hotword,
+			EnableSpk:     cfg.ASR.EnableSpk,
+		},
 		Bins: media.FFmpegBins{
 			FFmpeg:  cfg.FFmpeg.Path,
 			FFprobe: cfg.FFmpeg.FFprobePath,
@@ -59,6 +71,16 @@ func (s *server) handleReplicateRun(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
+	// Persist the chosen window before the long run. cfg is a value copy, so
+	// the live config must be updated under the lock; Save stays outside it.
+	norm := replicate.NormalizeSegmentSec(body.SegmentSec)
+	s.mu.Lock()
+	s.cfg.Replicate.SegmentSec = norm
+	s.mu.Unlock()
+	if err := config.Save(s.cfgPath, s.cfg); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
 	res, err := replicate.Run(r.Context(), params)
 	if err != nil {
 		http.Error(w, "提示词提取失败: "+err.Error(), 500)
@@ -67,14 +89,32 @@ func (s *server) handleReplicateRun(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.replicateLast = res
 	s.mu.Unlock()
+	segments := make([]map[string]any, 0, len(res.Segments))
+	for _, seg := range res.Segments {
+		segments = append(segments, map[string]any{
+			"index":       seg.Index,
+			"start_sec":   seg.StartSec,
+			"end_sec":     seg.EndSec,
+			"frame_start": seg.FrameStart,
+			"frame_count": len(seg.Frames),
+			"prompt_en":   seg.PromptEN,
+			"prompt_zh":   seg.PromptZH,
+			"analysis":    seg.Analysis,
+		})
+	}
 	writeJSON(w, map[string]any{
-		"output_dir":   res.OutputDir,
-		"frames":       len(res.Frames),
-		"duration_sec": res.DurationSec,
-		"prompt":       res.Prompt,
-		"prompt_en":    res.PromptEN,
-		"prompt_zh":    res.PromptZH,
-		"analysis":     res.Analysis,
+		"output_dir":        res.OutputDir,
+		"frames":            len(res.Frames),
+		"duration_sec":      res.DurationSec,
+		"prompt":            res.Prompt,
+		"prompt_en":         res.PromptEN,
+		"prompt_zh":         res.PromptZH,
+		"analysis":          res.Analysis,
+		"subtitle_path":     res.SubtitlePath,
+		"character_lock_zh": res.CharacterLockZH,
+		"character_lock_en": res.CharacterLockEN,
+		"character_ref":     res.CharacterRef,
+		"segments":          segments,
 	})
 }
 
