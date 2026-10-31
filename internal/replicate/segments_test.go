@@ -32,6 +32,9 @@ func TestNormalizeSegmentSec(t *testing.T) {
 
 func TestPlanSegments(t *testing.T) {
 	spansEqual(t, replicate.PlanSegments(0, 15), []replicate.Span{{Start: 0, End: 60}})
+	spansEqual(t, replicate.PlanSegments(-1, 15), []replicate.Span{{Start: 0, End: 60}})
+	spansEqual(t, replicate.PlanSegments(math.Inf(1), 15), []replicate.Span{{Start: 0, End: 60}})
+	spansEqual(t, replicate.PlanSegments(math.NaN(), 15), []replicate.Span{{Start: 0, End: 60}})
 	spansEqual(t, replicate.PlanSegments(10, 15), []replicate.Span{{Start: 0, End: 10}})
 	spansEqual(t, replicate.PlanSegments(15, 15), []replicate.Span{{Start: 0, End: 15}})
 	spansEqual(t, replicate.PlanSegments(15.4, 15), []replicate.Span{{Start: 0, End: 15.4}})
