@@ -17,13 +17,13 @@ func newAtlasPage() fyne.CanvasObject {
 
 	sections := make([]fyne.CanvasObject, 0, 8)
 	sections = append(sections,
-		widget.NewLabelWithStyle("手法图鉴", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		pageTitle("手法图鉴"),
 		header,
 		widget.NewSeparator(),
 	)
 
 	for _, layer := range original.AtlasLayers() {
-		title := widget.NewLabelWithStyle(layer.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+		title := sectionTitle(layer.Title)
 		intro := widget.NewLabel(layer.Intro)
 		intro.Wrapping = fyne.TextWrapWord
 		intro.Importance = widget.LowImportance
@@ -34,7 +34,7 @@ func newAtlasPage() fyne.CanvasObject {
 			if e.InTool {
 				badge = "本工具可做"
 			}
-			name := widget.NewLabelWithStyle(e.Name+"  ·  "+badge, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+			name := widget.NewLabelWithStyle(e.Name+" ("+badge+")", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 			feel := widget.NewLabel("观感: " + e.Feel)
 			feel.Wrapping = fyne.TextWrapWord
 			note := widget.NewLabel("说明: " + e.Note)

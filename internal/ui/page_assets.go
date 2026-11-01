@@ -46,7 +46,7 @@ func newAssetsPage(state *AppState) (fyne.CanvasObject, func()) {
 				lab.Truncation = fyne.TextTruncateEllipsis
 				box.Objects = []fyne.CanvasObject{lab}
 			case 2:
-				text := "— 未匹配"
+				text := "未匹配"
 				if strings.TrimSpace(r.sub) != "" {
 					text = filepath.Base(r.sub)
 				}
@@ -396,7 +396,7 @@ func newAssetsPage(state *AppState) (fyne.CanvasObject, func()) {
 
 	top := container.NewVBox(
 		container.NewBorder(nil, nil,
-			widget.NewLabelWithStyle("素材", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			pageTitle("素材"),
 			nil, status),
 		toolbar,
 	)

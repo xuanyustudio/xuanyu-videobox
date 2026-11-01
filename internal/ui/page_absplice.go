@@ -315,7 +315,7 @@ func newABSplicePage(state *AppState) fyne.CanvasObject {
 				dt := time.Since(t0).Round(time.Millisecond)
 				report := info.FormatReport(spliceDur, outFPS)
 				appendLog(fmt.Sprintf("分析完成（%s）：关键帧≈IDR %d，GOP %d，总帧 %d", dt, info.KeyFrames, info.GOPCount, info.FrameCount))
-				statusLabel.SetText(fmt.Sprintf("分析完成 · 关键帧 %d · GOP %d · 总帧 %d", info.KeyFrames, info.GOPCount, info.FrameCount))
+				statusLabel.SetText(fmt.Sprintf("分析完成: 关键帧 %d, GOP %d, 总帧 %d", info.KeyFrames, info.GOPCount, info.FrameCount))
 
 				body := widget.NewMultiLineEntry()
 				body.SetText(report)

@@ -28,10 +28,10 @@ func defaultDownloadDir(cfg *config.Config) string {
 
 func newLinkDownloadPage(state *AppState) fyne.CanvasObject {
 	var (
-		mu        sync.Mutex
-		busy      bool
-		cancelFn  context.CancelFunc
-		lastDir   string
+		mu       sync.Mutex
+		busy     bool
+		cancelFn context.CancelFunc
+		lastDir  string
 	)
 
 	subtitle := widget.NewLabel("粘贴视频分享链接 → 解析 → 下载无水印视频\n支持：抖音、快手、西瓜视频、微博、皮皮虾、好看视频、皮皮搞笑、梨视频")
@@ -162,7 +162,7 @@ func newLinkDownloadPage(state *AppState) fyne.CanvasObject {
 					appendLog(fmt.Sprintf("%s 解析失败: %s", tag, err))
 					continue
 				}
-				appendLog(fmt.Sprintf("%s [%s] %s — %s", tag, info.Platform, info.Title, info.Author))
+				appendLog(fmt.Sprintf("%s [%s] %s, %s", tag, info.Platform, info.Title, info.Author))
 
 				if info.VideoURL == "" {
 					appendLog(fmt.Sprintf("%s 无视频地址（图集？已跳过）", tag))
@@ -239,13 +239,12 @@ func newLinkDownloadPage(state *AppState) fyne.CanvasObject {
 	})
 	pasteBtn.Importance = widget.LowImportance
 
-	sec := func(text string) *widget.Label {
-		return widget.NewLabelWithStyle(text, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	}
+	sec := sectionTitle
 
 	toolbar := container.NewHBox(pasteBtn, startBtn, cancelBtn, openOutBtn, clearBtn)
 
 	body := container.NewVBox(
+		pageTitle("链接下载"),
 		subtitle,
 		sec("视频链接"),
 		urlEntry,

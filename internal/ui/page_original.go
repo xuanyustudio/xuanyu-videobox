@@ -56,7 +56,7 @@ func newOriginalPage(state *AppState) fyne.CanvasObject {
 	progress.Max = 100
 	progress.SetValue(0)
 
-	subtitle := widget.NewLabel("导出差异化（标准编码）· 勾选+滑条 · 可预览")
+	subtitle := widget.NewLabel("标准编码导出。勾选手法并拖动强度，可先预览再导出。")
 	subtitle.Importance = widget.LowImportance
 
 	style := original.DefaultSubtitleStyle()
@@ -446,10 +446,10 @@ func newOriginalPage(state *AppState) fyne.CanvasObject {
 				lastOut = out
 				progress.SetValue(100)
 				if preview {
-					status.SetText("预览完成 · " + out)
+					status.SetText("预览完成: " + out)
 					_ = media.OpenFile(out)
 				} else {
-					status.SetText("完成 · " + out)
+					status.SetText("完成: " + out)
 				}
 				openOutBtn.Enable()
 			})
@@ -468,10 +468,7 @@ func newOriginalPage(state *AppState) fyne.CanvasObject {
 	})
 	cancelBtn.Disable()
 
-	sec := func(text string) *widget.Label {
-		l := widget.NewLabelWithStyle(text, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-		return l
-	}
+	sec := sectionTitle
 
 	shortSlide := func(s *widget.Slider, trail *widget.Label) fyne.CanvasObject {
 		return container.NewHBox(
@@ -505,6 +502,7 @@ func newOriginalPage(state *AppState) fyne.CanvasObject {
 	)
 
 	body := container.NewVBox(
+		pageTitle("一键原创"),
 		subtitle,
 		container.NewBorder(nil, nil, toolbar, nil, videoLabel),
 		progress,

@@ -25,7 +25,7 @@ import (
 const replicateWholeView = "整片"
 
 func replicateSegmentLabel(seg replicate.SegmentResult) string {
-	return fmt.Sprintf("第 %d 段 · %.1f–%.1f秒", seg.Index, seg.StartSec, seg.EndSec)
+	return fmt.Sprintf("第 %d 段 %.1f-%.1f秒", seg.Index, seg.StartSec, seg.EndSec)
 }
 
 func newReplicatePage(state *AppState) fyne.CanvasObject {
@@ -136,7 +136,7 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 					break
 				}
 			}
-			hint = fmt.Sprintf("共 %d 张关键帧 · 已保存到 %s", len(frames), res.OutputDir)
+			hint = fmt.Sprintf("共 %d 张关键帧, 已保存到 %s", len(frames), res.OutputDir)
 		}
 		framesGrid.Objects = nil
 		for _, f := range frames {
@@ -320,9 +320,9 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 				progress.SetValue(100)
 				showResult(res)
 				if len(res.Segments) >= 2 {
-					status.SetText("完成 · 各段提示词已写入同一段锁定形象。到即梦或 Sora 分段生成时，请每一段都上传 " + res.CharacterRef)
+					status.SetText("完成。各段提示词已写入同一段锁定形象。到即梦或 Sora 分段生成时，请每一段都上传 " + res.CharacterRef)
 				} else {
-					status.SetText("完成 · " + res.OutputDir)
+					status.SetText("完成: " + res.OutputDir)
 				}
 				state.Log.Append("[爆款复刻] 完成: " + res.OutputDir)
 			})
@@ -340,9 +340,7 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 	})
 	cancelBtn.Disable()
 
-	sec := func(text string) *widget.Label {
-		return widget.NewLabelWithStyle(text, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	}
+	sec := sectionTitle
 
 	toolbar := container.NewHBox(pickVideoBtn, startBtn, cancelBtn, openOutBtn, clearBtn)
 	optsRow := container.NewHBox(
@@ -359,6 +357,7 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 	)
 
 	body := container.NewVBox(
+		pageTitle("爆款复刻"),
 		subtitle,
 		container.NewBorder(nil, nil, toolbar, nil, videoLabel),
 		progress,

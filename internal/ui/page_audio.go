@@ -182,7 +182,7 @@ func newAudioSplitPage(state *AppState) fyne.CanvasObject {
 	startBtn.Importance = widget.HighImportance
 
 	return container.NewPadded(container.NewVBox(
-		widget.NewLabelWithStyle("音频分离", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		pageTitle("音频分离"),
 		subtitle,
 		container.NewHBox(pickBtn, startBtn, cancelBtn, openBtn),
 		pathLabel,

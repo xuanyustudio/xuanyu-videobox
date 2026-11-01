@@ -4,12 +4,10 @@ package ui
 
 import (
 	"fmt"
-	"image/color"
 	"net/url"
 	"strings"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
@@ -192,7 +190,7 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 			status.SetText(fmt.Sprintf("保存失败: %v", err))
 			return
 		}
-		status.SetText("已保存 · " + state.CfgPath)
+		status.SetText("已保存: " + state.CfgPath)
 	})
 	saveBtn.Importance = widget.HighImportance
 
@@ -243,18 +241,16 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 		status,
 		cfgPath,
 	)
-	backdrop := canvas.NewRectangle(color.NRGBA{R: 0xd5, G: 0xde, B: 0xea, A: 0xff})
-	return container.NewStack(backdrop, container.NewVScroll(container.NewPadded(page)))
+	return container.NewVScroll(container.NewPadded(page))
 }
 
 func settingsForm(items ...fyne.CanvasObject) fyne.CanvasObject {
 	return container.New(layout.NewFormLayout(), items...)
 }
 
-// settingsCard keeps the subtitle on the title row and paints a lighter fill
-// than the settings backdrop so each group reads as its own block.
+// settingsCard keeps the subtitle on the title row and paints a theme surface.
 func settingsCard(title, subtitle string, body fyne.CanvasObject) fyne.CanvasObject {
-	titleLbl := widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	titleLbl := sectionTitle(title)
 	head := fyne.CanvasObject(titleLbl)
 	if strings.TrimSpace(subtitle) != "" {
 		sub := widget.NewLabel(subtitle)
@@ -263,11 +259,7 @@ func settingsCard(title, subtitle string, body fyne.CanvasObject) fyne.CanvasObj
 		sub.SizeName = theme.SizeNameCaptionText
 		head = container.NewBorder(nil, nil, titleLbl, nil, &looseWidth{CanvasObject: sub, minW: 24})
 	}
-	bg := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
-	bg.StrokeColor = color.NRGBA{R: 0x5c, G: 0x6d, B: 0x82, A: 0xff}
-	bg.StrokeWidth = 1
-	bg.CornerRadius = 8
-	return container.NewStack(bg, container.NewPadded(container.NewVBox(head, body)))
+	return newPanel(container.NewVBox(head, body))
 }
 
 // looseWidth reports a small minimum width so a one-line subtitle can sit

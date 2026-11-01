@@ -23,7 +23,7 @@ func newProjectPage(state *AppState) (fyne.CanvasObject, func()) {
 	status := widget.NewLabel("")
 	status.Importance = widget.LowImportance
 
-	grid := container.NewGridWrap(fyne.NewSize(300, 168))
+	grid := container.NewGridWrap(fyne.NewSize(300, 196))
 	scroll := container.NewVScroll(container.NewPadded(grid))
 
 	openProject := func(p *project.Project) {
@@ -179,30 +179,26 @@ func newProjectPage(state *AppState) (fyne.CanvasObject, func()) {
 		}
 	}
 
-	header := container.NewBorder(nil, nil, widget.NewLabelWithStyle("短剧解说", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, status)
-	return container.NewBorder(container.NewPadded(header), nil, nil, nil, scroll), refreshList
+	return container.NewBorder(container.NewPadded(status), nil, nil, nil, scroll), refreshList
 }
 
 func newQuickStartCard(onNew, onImport func()) fyne.CanvasObject {
-	title := canvas.NewText("快速开始", color.NRGBA{R: 0x5b, G: 0x4b, B: 0xc4, A: 0xff})
-	title.TextStyle = fyne.TextStyle{Bold: true}
-	title.Alignment = fyne.TextAlignCenter
-	title.TextSize = 15
+	title := widget.NewLabelWithStyle("快速开始", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	title.Importance = widget.HighImportance
 
-	newBtn := widget.NewButton("+ 新建短剧项目", onNew)
+	newBtn := widget.NewButton("新建项目", onNew)
 	newBtn.Importance = widget.HighImportance
-	importBtn := widget.NewButton("导入短剧项目", onImport)
-	importBtn.Importance = widget.LowImportance
+	importBtn := widget.NewButton("导入项目", onImport)
 
 	body := container.NewVBox(
 		container.NewCenter(title),
 		container.NewPadded(container.NewGridWithColumns(2, newBtn, importBtn)),
 	)
 
-	bg := canvas.NewRectangle(color.NRGBA{R: 0xf7, G: 0xf5, B: 0xff, A: 0xff})
+	bg := canvas.NewRectangle(currentColor(theme.ColorNameHeaderBackground))
 	bg.CornerRadius = 10
 	border := canvas.NewRectangle(color.Transparent)
-	border.StrokeColor = color.NRGBA{R: 0x8b, G: 0x7c, B: 0xe0, A: 0xff}
+	border.StrokeColor = currentColor(theme.ColorNamePrimary)
 	border.StrokeWidth = 1.5
 	border.CornerRadius = 10
 
@@ -227,9 +223,9 @@ func newProjectCard(p project.Project, active bool, onOpen, onFolder, onRename, 
 	descLabel.Importance = widget.LowImportance
 
 	tags := container.NewHBox(
-		makeTag("草稿", color.NRGBA{R: 0xee, G: 0xf0, B: 0xf4, A: 0xff}, color.NRGBA{R: 0x5a, G: 0x64, B: 0x72, A: 0xff}),
-		makeTag(fmt.Sprintf("视频 %d", len(p.VideoPaths)), color.NRGBA{R: 0xeb, G: 0xe6, B: 0xff, A: 0xff}, color.NRGBA{R: 0x5b, G: 0x4b, B: 0xc4, A: 0xff}),
-		makeTag(fmt.Sprintf("字幕 %d", countNonEmpty(p.SubtitlePaths)), color.NRGBA{R: 0xff, G: 0xef, B: 0xd6, A: 0xff}, color.NRGBA{R: 0xb8, G: 0x6a, B: 0x00, A: 0xff}),
+		makeTag("草稿"),
+		makeTag(fmt.Sprintf("视频 %d", len(p.VideoPaths))),
+		makeTag(fmt.Sprintf("字幕 %d", countNonEmpty(p.SubtitlePaths))),
 	)
 
 	folderBtn := widget.NewButtonWithIcon("", theme.FolderOpenIcon(), onFolder)
@@ -244,34 +240,35 @@ func newProjectCard(p project.Project, active bool, onOpen, onFolder, onRename, 
 	if ts == "" {
 		ts = formatProjectTime(p.CreatedAt)
 	}
-	timeLabel := canvas.NewText(ts, color.NRGBA{R: 0x8a, G: 0x96, B: 0xa6, A: 0xff})
-	timeLabel.TextSize = 12
+	timeLabel := widget.NewLabel(ts)
+	timeLabel.Importance = widget.LowImportance
+	timeLabel.SizeName = theme.SizeNameCaptionText
 
 	top := container.NewBorder(nil, nil, nil, actions, titleBtn)
 	body := container.NewVBox(top, descLabel, tags, timeLabel)
 
-	bg := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	bg := canvas.NewRectangle(currentColor(theme.ColorNameHeaderBackground))
 	bg.CornerRadius = 10
 	if active {
-		bg.FillColor = color.NRGBA{R: 0xef, G: 0xf5, B: 0xff, A: 0xff}
+		bg.FillColor = currentColor(theme.ColorNameSelection)
 	}
 	border := canvas.NewRectangle(color.Transparent)
-	border.StrokeColor = color.NRGBA{R: 0xe2, G: 0xe8, B: 0xf0, A: 0xff}
+	border.StrokeColor = currentColor(theme.ColorNameSeparator)
 	border.StrokeWidth = 1
 	border.CornerRadius = 10
 	if active {
-		border.StrokeColor = color.NRGBA{R: 0x1a, G: 0x73, B: 0xe8, A: 0xff}
+		border.StrokeColor = currentColor(theme.ColorNamePrimary)
 		border.StrokeWidth = 1.5
 	}
 
 	return container.NewStack(bg, border, container.NewPadded(body))
 }
 
-
-func makeTag(text string, bgColor, fgColor color.Color) fyne.CanvasObject {
-	label := canvas.NewText(text, fgColor)
-	label.TextSize = 11
-	bg := canvas.NewRectangle(bgColor)
+func makeTag(text string) fyne.CanvasObject {
+	label := widget.NewLabel(text)
+	label.SizeName = theme.SizeNameCaptionText
+	label.Importance = widget.LowImportance
+	bg := canvas.NewRectangle(currentColor(theme.ColorNameButton))
 	bg.CornerRadius = 8
 	return container.NewStack(bg, container.NewPadded(label))
 }

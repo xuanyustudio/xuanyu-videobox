@@ -272,12 +272,12 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 				if kind == "four" {
 					fourPath = saved
 					showImage(fourBox, saved)
-					fourHint.SetText("四视图 · " + saved)
-					status.SetText("四视图已保存 · " + saved)
+					fourHint.SetText("四视图: " + saved)
+					status.SetText("四视图已保存: " + saved)
 					state.Log.Append("[介绍片] 四视图完成: " + saved)
 					return
 				}
-				status.SetText("介绍片已保存 · " + saved)
+				status.SetText("介绍片已保存: " + saved)
 				state.Log.Append("[介绍片] 视频完成: " + saved)
 			})
 		}()
@@ -299,9 +299,7 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 	hint.Wrapping = fyne.TextWrapWord
 	hint.Importance = widget.LowImportance
 
-	sec := func(text string) *widget.Label {
-		return widget.NewLabelWithStyle(text, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	}
+	sec := sectionTitle
 
 	toolbar := container.NewHBox(pickBtn, fourBtn, videoBtn, cancelBtn, openOutBtn, clearBtn)
 	previews := container.NewGridWithColumns(2,
@@ -309,6 +307,7 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 		container.NewVBox(sec("四视图"), fourHint, fourBox),
 	)
 	body := container.NewVBox(
+		pageTitle("介绍片"),
 		subtitle,
 		container.NewBorder(nil, nil, toolbar, nil, imageLabel),
 		progress,

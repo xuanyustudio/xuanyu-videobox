@@ -32,7 +32,7 @@ func newScriptPage(state *AppState) (fyne.CanvasObject, func()) {
 	}
 	targetEntry.SetText(strconv.Itoa(targetSec))
 
-	estimateLabel := widget.NewLabel("预估时长: —")
+	estimateLabel := widget.NewLabel("预估时长: 未估算")
 	warnLabel := widget.NewLabel("")
 	warnLabel.Importance = widget.WarningImportance
 	status := widget.NewLabel("")
@@ -40,7 +40,7 @@ func newScriptPage(state *AppState) (fyne.CanvasObject, func()) {
 
 	updateEstimate := func() {
 		if state.Project == nil {
-			estimateLabel.SetText("预估时长: —")
+			estimateLabel.SetText("预估时长: 未估算")
 			warnLabel.SetText("")
 			return
 		}
@@ -249,7 +249,7 @@ func newScriptPage(state *AppState) (fyne.CanvasObject, func()) {
 			if vid <= 0 {
 				vid = 1
 			}
-			meta.SetText(fmt.Sprintf("%s  ·  视频 %d  ·  OST %d", item.Timestamp, vid, item.OST))
+			meta.SetText(fmt.Sprintf("%s  视频 %d  OST %d", item.Timestamp, vid, item.OST))
 		},
 	)
 	generateBtn := widget.NewButton("生成脚本", nil)
@@ -318,7 +318,7 @@ func newScriptPage(state *AppState) (fyne.CanvasObject, func()) {
 	)
 	header := container.NewVBox(
 		container.NewBorder(nil, nil,
-			widget.NewLabelWithStyle("脚本", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			pageTitle("脚本"),
 			nil, estimateLabel),
 		params,
 		warnLabel,

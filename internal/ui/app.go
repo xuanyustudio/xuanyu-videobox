@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/narratoai/narrato-go/internal/config"
@@ -68,8 +69,8 @@ func Run() {
 
 	a := app.NewWithID("com.narratoai.narrato-go")
 	a.Settings().SetTheme(newNarratoTheme())
-	w := a.NewWindow("Narrato · 短剧解说")
-	w.Resize(fyne.NewSize(980, 700))
+	w := a.NewWindow("Narrato")
+	w.Resize(fyne.NewSize(1180, 760))
 	w.SetMaster()
 
 	state := &AppState{
@@ -94,10 +95,10 @@ func Run() {
 	state.onRefreshAssets = refreshAssets
 	state.onRefreshScript = refreshScript
 
-	statusBar := widget.NewLabel("就绪 · 选择或新建工程")
+	statusBar := widget.NewLabel("就绪。选择或新建工程")
 	statusBar.Importance = widget.LowImportance
 
-	projTitle := widget.NewLabelWithStyle("工程工作台", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	projTitle := pageTitle("工程工作台")
 	backBtn := widget.NewButton("← 返回工程列表", nil)
 	backBtn.Importance = widget.LowImportance
 
@@ -120,11 +121,11 @@ func Run() {
 		projectPage.Show()
 		homeStack.Refresh()
 		refreshProject()
-		w.SetTitle("Narrato · 短剧解说")
+		w.SetTitle("Narrato")
 		if state.Project != nil {
-			statusBar.SetText("工程列表 · 可重新打开: " + state.Project.Name)
+			statusBar.SetText("工程列表。可重新打开: " + state.Project.Name)
 		} else {
-			statusBar.SetText("就绪 · 选择或新建工程")
+			statusBar.SetText("就绪。选择或新建工程")
 		}
 	}
 	showWorkspace = func() {
@@ -135,15 +136,15 @@ func Run() {
 		if name == "" {
 			name = state.Project.Slug
 		}
-		projTitle.SetText("工程 · " + name)
-		w.SetTitle("Narrato · " + name)
+		projTitle.SetText(name)
+		w.SetTitle("Narrato - " + name)
 		projectPage.Hide()
 		workspaceView.Show()
 		homeStack.Refresh()
 		workspaceTabs.SelectIndex(0)
 		refreshAssets()
 		refreshScript()
-		statusBar.SetText("当前工程: " + name + "  ·  在下级页签完成素材 / 脚本 / 合成")
+		statusBar.SetText("当前工程: " + name + "。在素材、脚本、合成里继续")
 	}
 
 	backBtn.OnTapped = func() { showHome() }
@@ -153,20 +154,20 @@ func Run() {
 	atlasPage := newAtlasPage()
 	introPage := newIntroPage(state)
 	audioPage := newAudioSplitPage(state)
-	mainTabs := container.NewAppTabs(
-		container.NewTabItem("短剧解说", homeStack),
-		container.NewTabItem("设置", settingsPage),
-		container.NewTabItem("一键原创", originalPage),
-		container.NewTabItem("爆款复刻", replicatePage),
-		container.NewTabItem("链接下载", linkDLPage),
-		container.NewTabItem("AB 拼接", abSplicePage),
-		container.NewTabItem("手法图鉴", atlasPage),
-		container.NewTabItem("介绍片", introPage),
-		container.NewTabItem("音频分离", audioPage),
-	)
-	mainTabs.SetTabLocation(container.TabLocationTop)
+	rail, content := newRail([]railItem{
+		{Label: "短剧解说", Icon: theme.MediaVideoIcon(), Page: homeStack},
+		{Label: "一键原创", Icon: theme.ColorChromaticIcon(), Page: originalPage},
+		{Label: "爆款复刻", Icon: theme.ContentCopyIcon(), Page: replicatePage},
+		{Label: "链接下载", Icon: theme.DownloadIcon(), Page: linkDLPage},
+		{Label: "AB 拼接", Icon: theme.ContentCutIcon(), Page: abSplicePage},
+		{Label: "手法图鉴", Icon: theme.DocumentIcon(), Page: atlasPage},
+		{Label: "介绍片", Icon: theme.MediaPhotoIcon(), Page: introPage},
+		{Label: "音频分离", Icon: theme.FileAudioIcon(), Page: audioPage},
+		{Label: "设置", Icon: theme.SettingsIcon(), Page: settingsPage},
+	})
 
-	w.SetContent(container.NewBorder(nil, container.NewPadded(statusBar), nil, nil, mainTabs))
+	statusRow := container.NewVBox(widget.NewSeparator(), container.NewPadded(statusBar))
+	w.SetContent(container.NewBorder(nil, statusRow, rail, nil, content))
 	refreshProject()
 	trackIME(w)
 	w.ShowAndRun()
