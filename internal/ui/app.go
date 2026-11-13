@@ -154,6 +154,7 @@ func Run() {
 	atlasPage := newAtlasPage()
 	introPage := newIntroPage(state)
 	audioPage := newAudioSplitPage(state)
+	subtitlePage := newSubtitlePage(state)
 	rail, content := newRail([]railItem{
 		{Label: "短剧解说", Icon: theme.MediaVideoIcon(), Page: homeStack},
 		{Label: "一键原创", Icon: theme.ColorChromaticIcon(), Page: originalPage},
@@ -163,6 +164,7 @@ func Run() {
 		{Label: "手法图鉴", Icon: theme.DocumentIcon(), Page: atlasPage},
 		{Label: "介绍片", Icon: theme.MediaPhotoIcon(), Page: introPage},
 		{Label: "音频分离", Icon: theme.FileAudioIcon(), Page: audioPage},
+		{Label: "加字幕", Icon: theme.FileIcon(), Page: subtitlePage},
 		{Label: "设置", Icon: theme.SettingsIcon(), Page: settingsPage},
 	})
 
