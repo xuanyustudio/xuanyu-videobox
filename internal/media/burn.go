@@ -31,6 +31,11 @@ func BurnSubtitles(ctx context.Context, bins FFmpegBins, videoPath, srtPath, out
 	return nil
 }
 
+// EscapeSubtitlesFilterPath normalizes paths for ffmpeg's subtitles filter (Windows-safe).
+func EscapeSubtitlesFilterPath(videoPath, srtPath string) string {
+	return escapeSubtitlesFilterPath(videoPath, srtPath)
+}
+
 // escapeSubtitlesFilterPath normalizes paths for ffmpeg's subtitles filter (Windows-safe).
 func escapeSubtitlesFilterPath(videoPath, srtPath string) string {
 	if rel, err := filepath.Rel(filepath.Dir(videoPath), srtPath); err == nil && rel != "" && !strings.HasPrefix(rel, "..") {
