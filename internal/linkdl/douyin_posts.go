@@ -61,7 +61,7 @@ func fetchDouyinAuthorPosts(ctx context.Context, profileURL, cursor, apiBase, ap
 	q := url.Values{}
 	q.Set("url", profileURL)
 	q.Set("count", strconv.Itoa(douyinAuthorPostsCount))
-	q.Set("wait", "25")
+q.Set("wait", "25")
 	q.Set("lang", "zh")
 	if c := strings.TrimSpace(cursor); c != "" {
 		q.Set("cursor", c)

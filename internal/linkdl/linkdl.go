@@ -50,6 +50,17 @@ var defaultClient = &http.Client{
 	},
 }
 
+// downloadClient is used for video body transfers; 30s is too short for large files.
+var downloadClient = &http.Client{
+	Timeout: 30 * time.Minute,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("too many redirects")
+		}
+		return nil
+	},
+}
+
 var noRedirectClient = &http.Client{
 	Timeout: 15 * time.Second,
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -118,7 +129,7 @@ func Download(ctx context.Context, info *VideoInfo, outDir string, onProgress fu
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Referer", info.VideoURL)
 
-	resp, err := defaultClient.Do(req)
+	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("下载请求失败: %w", err)
 	}
@@ -201,6 +212,25 @@ func sanitizeFilename(s string) string {
 		s = s[:120]
 	}
 	return s
+}
+
+
+// ExistingDownload returns the planned .mp4 path for info.Title and whether a
+// non-empty file already exists there (used by "skip already downloaded").
+func ExistingDownload(outDir string, info *VideoInfo) (string, bool) {
+	if info == nil {
+		return "", false
+	}
+	filename := sanitizeFilename(info.Title)
+	if filename == "" {
+		return "", false
+	}
+	outPath := filepath.Join(outDir, filename+".mp4")
+	st, err := os.Stat(outPath)
+	if err != nil || st.Size() <= 0 {
+		return outPath, false
+	}
+	return outPath, true
 }
 
 func uniquePath(p string) string {

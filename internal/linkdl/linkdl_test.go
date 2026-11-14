@@ -487,3 +487,19 @@ func TestConfigureDouyin(t *testing.T) {
 		t.Errorf("key = %q", key)
 	}
 }
+
+func TestExistingDownload(t *testing.T) {
+	dir := t.TempDir()
+	info := &VideoInfo{Title: "hello/world", Platform: "douyin"}
+	path, ok := ExistingDownload(dir, info)
+	if ok {
+		t.Fatal("expected missing")
+	}
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path2, ok := ExistingDownload(dir, info)
+	if !ok || path2 != path {
+		t.Fatalf("got %v %q want true %q", ok, path2, path)
+	}
+}
