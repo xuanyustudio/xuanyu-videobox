@@ -15,7 +15,7 @@ func TestSubtitlesFilter(t *testing.T) {
 	video := filepath.Join(dir, "clip.mp4")
 	srt := filepath.Join(dir, "clip.srt")
 	got := subtitleburn.SubtitlesFilter(video, srt, subtitleburn.DefaultStyle())
-	want := "subtitles='clip.srt':force_style='FontSize=22,FontName=Arial,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1,MarginV=36'"
+	want := "subtitles='clip.srt':force_style='FontSize=15,FontName=Arial,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1,MarginV=36'"
 	if got != want {
 		t.Fatalf("got %s\nwant %s", got, want)
 	}

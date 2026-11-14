@@ -16,10 +16,10 @@ type Style struct {
 	MarginV      int
 }
 
-// DefaultStyle matches original.DefaultSubtitleStyle.
+// DefaultStyle matches original.DefaultSubtitleStyle, with font size 15.
 func DefaultStyle() Style {
 	return Style{
-		FontSize:     22,
+		FontSize:     15,
 		FontName:     "Arial",
 		PrimaryColor: "#FFFFFF",
 		OutlineColor: "#000000",

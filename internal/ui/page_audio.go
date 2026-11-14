@@ -191,21 +191,64 @@ func newAudioSplitPage(state *AppState) fyne.CanvasObject {
 }
 
 func resolveFFmpeg(state *AppState) (media.FFmpegBins, error) {
-	bins := media.FFmpegBins{FFmpeg: strings.TrimSpace(state.Cfg.FFmpeg.Path)}
-	if bins.FFmpeg != "" {
-		if st, err := os.Stat(bins.FFmpeg); err != nil || st.IsDir() {
-			return bins, fmt.Errorf("找不到 ffmpeg：%s（请在「设置」里配置 ffmpeg 路径）", bins.FFmpeg)
-		}
-		return bins, nil
-	}
 	beside := ""
 	if exe, err := os.Executable(); err == nil {
 		beside = filepath.Dir(exe)
 	}
-	ff, err := media.ResolveFFmpeg("", beside)
+	ff, err := locateTool(strings.TrimSpace(state.Cfg.FFmpeg.Path), beside, "ffmpeg")
 	if err != nil {
-		return bins, fmt.Errorf("找不到 ffmpeg：%w（请在「设置」里配置 ffmpeg 路径）", err)
+		return media.FFmpegBins{}, err
 	}
-	bins.FFmpeg = ff
-	return bins, nil
+	fp, _ := locateTool(strings.TrimSpace(state.Cfg.FFmpeg.FFprobePath), beside, "ffprobe")
+	if fp == "" {
+		if abs, err := existingAbs(filepath.Join(filepath.Dir(ff), "ffprobe.exe")); err == nil {
+			fp = abs
+		}
+	}
+	return media.FFmpegBins{FFmpeg: ff, FFprobe: fp}, nil
+}
+
+func locateTool(configured, beside, name string) (string, error) {
+	if configured != "" {
+		if abs, err := existingAbs(configured); err == nil {
+			return abs, nil
+		}
+		if beside != "" {
+			if abs, err := existingAbs(filepath.Join(beside, filepath.Base(configured))); err == nil {
+				return abs, nil
+			}
+		}
+		return "", fmt.Errorf("找不到 %s：%s（请在「设置」里填写完整路径）", name, configured)
+	}
+	var (
+		found string
+		err   error
+	)
+	if name == "ffprobe" {
+		found, err = media.ResolveFFprobe("", beside)
+	} else {
+		found, err = media.ResolveFFmpeg("", beside)
+	}
+	if err != nil {
+		return "", fmt.Errorf("找不到 %s：%w（请在「设置」里填写完整路径）", name, err)
+	}
+	if abs, err := existingAbs(found); err == nil {
+		return abs, nil
+	}
+	return found, nil
+}
+
+func existingAbs(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		abs = p
+	}
+	st, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if st.IsDir() {
+		return "", fmt.Errorf("%s 是目录", abs)
+	}
+	return abs, nil
 }

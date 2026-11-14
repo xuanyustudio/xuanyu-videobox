@@ -1,6 +1,7 @@
 package media
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -63,8 +64,9 @@ func Run(ctx context.Context, bin string, args ...string) (string, error) {
 }
 
 // RunInDir is like Run but sets the process working directory when dir is non-empty.
+// A relative bin is made absolute first, so changing dir does not hide the executable.
 func RunInDir(ctx context.Context, dir, bin string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := exec.CommandContext(ctx, absCommand(bin), args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -74,4 +76,47 @@ func RunInDir(ctx context.Context, dir, bin string, args ...string) (string, err
 	hideConsole(cmd)
 	err := cmd.Run()
 	return combined.String(), err
+}
+
+// RunInDirLines runs bin and calls onLine for each stdout line.
+// stderr is returned as text. A relative bin is made absolute before dir is applied.
+func RunInDirLines(ctx context.Context, dir, bin string, onLine func(string), args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, absCommand(bin), args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	hideConsole(cmd)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return stderr.String(), err
+	}
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		if onLine != nil {
+			onLine(scanner.Text())
+		}
+	}
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		return stderr.String(), waitErr
+	}
+	if err := scanner.Err(); err != nil {
+		return stderr.String(), err
+	}
+	return stderr.String(), nil
+}
+
+func absCommand(bin string) string {
+	if bin == "" || filepath.IsAbs(bin) {
+		return bin
+	}
+	if abs, err := filepath.Abs(bin); err == nil {
+		return abs
+	}
+	return bin
 }

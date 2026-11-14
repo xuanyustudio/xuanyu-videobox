@@ -29,7 +29,7 @@ func newSubtitlePage(state *AppState) fyne.CanvasObject {
 		lastOut string
 	)
 
-	intro := widget.NewLabel("选择一个或多个视频，再选择字幕。同名的字幕会烧进去，对不上的视频用设置里的语音识别。")
+	intro := widget.NewLabel("选择一个或多个视频，再选择字幕。同名的字幕会烧进去，对不上的视频用设置里的语音识别。成片和识别出的字幕写到视频目录下的 srt 文件夹。")
 	intro.Wrapping = fyne.TextWrapWord
 	intro.Importance = widget.LowImportance
 
@@ -41,6 +41,11 @@ func newSubtitlePage(state *AppState) fyne.CanvasObject {
 	status := widget.NewLabel("")
 	status.Wrapping = fyne.TextWrapWord
 	status.Importance = widget.LowImportance
+
+	progress := widget.NewProgressBar()
+	progress.Min = 0
+	progress.Max = 100
+	progress.SetValue(0)
 
 	style := subtitleburn.DefaultStyle()
 	const sliderWidth float32 = 220
@@ -211,6 +216,7 @@ func newSubtitlePage(state *AppState) fyne.CanvasObject {
 		cancel = cancelFn
 		setBusy(true)
 		mu.Unlock()
+		progress.SetValue(0)
 		status.SetText("正在处理…")
 
 		go func() {
@@ -244,10 +250,10 @@ func newSubtitlePage(state *AppState) fyne.CanvasObject {
 						continue
 					}
 					fyne.Do(func() {
+						progress.SetValue(float64(i) / float64(total) * 100)
 						status.SetText(fmt.Sprintf("正在识别 %d/%d %s…", n, total, name))
 					})
-					stem := strings.TrimSuffix(name, filepath.Ext(name))
-					asrOut, err := subtitleburn.UniquePath(filepath.Join(filepath.Dir(it.Video), stem+"_asr.srt"))
+					asrOut, err := subtitleburn.PrepareOutput(it.Video, "_asr.srt")
 					if err != nil {
 						if fail == nil {
 							fail = err
@@ -271,10 +277,10 @@ func newSubtitlePage(state *AppState) fyne.CanvasObject {
 					subPath = asrOut
 				}
 				fyne.Do(func() {
+					progress.SetValue(float64(i) / float64(total) * 100)
 					status.SetText(fmt.Sprintf("正在烧录 %d/%d %s…", n, total, name))
 				})
-				stem := strings.TrimSuffix(name, filepath.Ext(name))
-				outPath, err := subtitleburn.UniquePath(filepath.Join(filepath.Dir(it.Video), stem+"_sub.mp4"))
+				outPath, err := subtitleburn.PrepareOutput(it.Video, "_sub.mp4")
 				if err != nil {
 					if fail == nil {
 						fail = err
@@ -282,7 +288,14 @@ func newSubtitlePage(state *AppState) fyne.CanvasObject {
 					failCount++
 					continue
 				}
-				if err := subtitleburn.Burn(ctx, bins, it.Video, subPath, outPath, style); err != nil {
+				err = subtitleburn.BurnProgress(ctx, bins, it.Video, subPath, outPath, style, func(pct int) {
+					fyne.Do(func() {
+						overall := (float64(i) + float64(pct)/100) / float64(total) * 100
+						progress.SetValue(overall)
+						status.SetText(fmt.Sprintf("正在烧录 %d/%d %s… %d%%", n, total, name, pct))
+					})
+				})
+				if err != nil {
 					if ctx.Err() != nil {
 						break
 					}
@@ -306,10 +319,15 @@ func newSubtitlePage(state *AppState) fyne.CanvasObject {
 				case ctx.Err() != nil:
 					status.SetText(fmt.Sprintf("已停止，已完成 %d 个", len(done)))
 				case fail != nil:
+					if len(items) > 0 {
+						progress.SetValue(float64(len(done)) / float64(len(items)) * 100)
+					}
 					status.SetText(fmt.Sprintf("成功 %d 个，失败 %d 个：%s", len(done), failCount, fail.Error()))
 				case len(done) == 1:
+					progress.SetValue(100)
 					status.SetText("已保存 " + done[0])
 				case len(done) > 1:
+					progress.SetValue(100)
 					status.SetText(fmt.Sprintf("已保存 %d 个，最后一个：%s", len(done), done[len(done)-1]))
 				default:
 					status.SetText("已停止，已完成 0 个")
@@ -397,6 +415,7 @@ func newSubtitlePage(state *AppState) fyne.CanvasObject {
 		container.NewHBox(pickVideoBtn, pickSubBtn, clearSubBtn, startBtn, cancelBtn, openBtn),
 		videoLabel,
 		subLabel,
+		progress,
 		status,
 		sectionTitle("字幕样式"),
 		styleForm,

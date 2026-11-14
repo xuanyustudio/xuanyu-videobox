@@ -7,6 +7,22 @@ import (
 	"strings"
 )
 
+// OutputDir is the folder under a video's directory that receives new files.
+func OutputDir(videoPath string) string {
+	return filepath.Join(filepath.Dir(videoPath), "srt")
+}
+
+// PrepareOutput creates OutputDir and returns a non-colliding path inside it.
+// suffix includes the underscore and extension, such as "_sub.mp4" or "_asr.srt".
+func PrepareOutput(videoPath, suffix string) (string, error) {
+	dir := OutputDir(videoPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	stem := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
+	return UniquePath(filepath.Join(dir, stem+suffix))
+}
+
 // UniquePath returns path when it does not exist.
 // Otherwise it inserts _2, _3, ... before the extension, starting at 2.
 func UniquePath(path string) (string, error) {
