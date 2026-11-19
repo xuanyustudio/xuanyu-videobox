@@ -1,6 +1,6 @@
-# narrato-go
+# xuanyu-videobox
 
-玄宇视频工具箱（仓库名 narrato-go）是 NarratoAI 的纯 Go 客户端，与仓库根目录下的 Python + Streamlit 版并行开发，**不替换**现有 `webui.py` 工作流。
+玄宇视频工具箱（仓库名 xuanyu-videobox）是 NarratoAI 的纯 Go 客户端，与仓库根目录下的 Python + Streamlit 版并行开发，**不替换**现有 `webui.py` 工作流。
 
 默认界面为**原生 Fyne 窗口**（需本机/仓库内的 MinGW gcc）。仓库已附带便携工具链：`tools/w64devkit`（GCC 14，与 Go CGO 兼容）。
 
@@ -28,7 +28,7 @@
 ### Windows 一键打包
 
 ```powershell
-cd narrato-go
+cd xuanyu-videobox
 .\scripts\build_windows.ps1
 ```
 
