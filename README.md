@@ -1,27 +1,37 @@
-# xuanyu-videobox
+# 玄宇视频工具箱
 
-玄宇视频工具箱（仓库名 xuanyu-videobox）是 NarratoAI 的纯 Go 客户端，与仓库根目录下的 Python + Streamlit 版并行开发，**不替换**现有 `webui.py` 工作流。
+仓库：[xuanyustudio/xuanyu-videobox](https://github.com/xuanyustudio/xuanyu-videobox)
 
-默认界面为**原生 Fyne 窗口**（需本机/仓库内的 MinGW gcc）。仓库已附带便携工具链：`tools/w64devkit`（GCC 14，与 Go CGO 兼容）。
+本人做解说和漫剧过程中，发现需要改动的周边工具，于是把日常会反复用到的能力收进这个 Windows 桌面工具箱。打开后窗口标题是「玄宇视频工具箱」。
 
-## 进度
+默认界面是原生窗口（Fyne）。剪辑、合成和转码依赖本机的 **ffmpeg / ffprobe**；编译原生窗口需要 **gcc**（仓库已附带 `tools/w64devkit`，请勿使用 GCC 15 的 bigobj 版）。
 
-- **Task 1–12**：已完成（配置、脚本/工程模型、media、LLM/TTS、pipeline、Fyne 原生 UI）。
-- **Phase-1 MVP**：可本地新建工程、生成脚本、跑合成流水线。
+本地密钥写在本机的 `config.yaml` 里，不会进入本仓库。
+
+## 功能
+
+侧栏从上到下依次是：
+
+- **短剧解说**：用工程组织素材、脚本和成片，跑解说向的合成流水线
+- **一键原创**：勾选画面手法、调节强度，先预览再按标准编码导出
+- **提示词提取**：可一次多选视频，按队列做字幕、抽帧并生成提示词
+- **视频逆向**：用设置里的视觉模型和内置 Pi Agent，拆出角色表、分镜和复刻方案，支持从断点继续
+- **爆点开头**：结合画面、台词和音量，选出大约 3 到 8 秒最抓眼球的片段，加转场接到片头，合成新视频
+- **链接下载**：粘贴分享链接，解析并下载无水印视频，支持抖音、快手、西瓜视频、微博等，也可解析作者主页后批量下载
+- **AB 拼接**：用 A 素材（图片或视频）与 B 画面视频按设定拼接导出
+- **手法图鉴**：查阅各层画面手法的说明和观感
+- **口播视频**：上传角色图，生成四视图，再做成对着镜头介绍新片的口播视频；可选用参考音色或上传自己的参考音
+- **克隆音频**：用 MiniMax 根据参考音复刻音色，也可查询、试听账号里已有的音色，再拿来合成口播
+- **音频分离**：从视频抽出音轨，保存为同目录下的 MP3，支持批量
+- **加字幕**：为视频烧录字幕；对不上的文件会走设置里的语音识别，成片和识别出的字幕写到视频目录下的 `srt` 文件夹
+- **视频合并**：按列表顺序合并多段视频；画面尺寸不一致时按最大的一段对齐，其余补黑边
+- **设置**：配置视觉模型、语音识别、MiniMax 等接口
 
 ## 依赖
 
-- **Go** 1.21+（开发构建）
-- **ffmpeg / ffprobe**：成片探测与合成必需。发布包需将可执行文件放入 `dist/`；开发时请在系统 PATH 中可用，或在 `config.yaml` 中配置 `ffmpeg.path` / `ffprobe.path`。
-- **原生窗口构建**：需要 `gcc`（推荐 `tools/w64devkit`，**勿用 GCC 15 的 bigobj 版**，Go CGO 无法解析）。
-
-## 配置
-
-本地用户配置使用 **`config.yaml`**（与 Python 版 `config.toml` 部分键兼容），存放于用户数据目录或工程旁。密钥仅保存在本机。
-
-「提示词提取」页签使用 OpenAI 兼容的视觉模型（默认 ModelScope `Qwen/Qwen3-VL-8B-Instruct`），在「设置」中填写 `replicate.base_url` / `replicate.api_key` / `replicate.model`（对应 Python 版 `QWEN_API_BASE_URL` / `QWEN_API_KEY` / `QWEN_MODEL_ID`）；`replicate.frames` 为默认关键帧数（8）。结果（关键帧 + SORA2 中英文提示词）保存在源视频同目录 `replicate_<时间戳>/`。
-
-工程目录语义对齐 Python 版：`resource/projects/<slug>/project.json` 及 `exports/` 结构，便于互导与对照验收。
+- **Go** 1.25（见 `go.mod`）
+- **ffmpeg / ffprobe**：成片探测与合成必需。发布时请把可执行文件放到 `dist/`；开发时可放在系统 PATH，或在 `config.yaml` 中配置路径
+- **gcc**：原生窗口构建需要（推荐仓库内的 `tools/w64devkit`）
 
 ## 构建与运行
 
@@ -36,29 +46,29 @@ cd xuanyu-videobox
 
 | 文件 | 说明 |
 |------|------|
-| `dist/narrato.exe` | 默认产品：原生 Fyne 窗口 |
+| `dist/玄宇视频工具箱.exe` | 默认产品：原生窗口 |
 | `dist/narrato-cli.exe` | 控制台版（无 Fyne） |
-| `dist/narrato-web.exe` | 浏览器 UI 兜底（无 CGO） |
+| `dist/narrato-web.exe` | 浏览器 UI 兜底（无需 CGO） |
 
 分发前请将 **ffmpeg.exe** 与 **ffprobe.exe** 复制到 `dist/`（与 exe 同目录）。
 
 ### 手动构建
 
-**原生 Fyne（推荐）：**
+原生窗口（推荐）：
 
 ```powershell
 $env:Path = "$PWD\tools\w64devkit\bin;$env:Path"
 $env:CGO_ENABLED = "1"
-go build -tags fyne_gui -ldflags "-H windowsgui -s -w" -o dist/narrato.exe ./cmd/narrato
+go build -tags fyne_gui -ldflags "-H windowsgui -s -w" -o dist/玄宇视频工具箱.exe ./cmd/narrato
 ```
 
-**浏览器 UI 兜底（无需 gcc）：**
+浏览器 UI 兜底（无需 gcc）：
 
 ```powershell
 go build -ldflags "-H windowsgui -s -w" -o dist/narrato-web.exe ./cmd/narrato
 ```
 
-**开发运行：**
+开发运行：
 
 ```powershell
 $env:Path = "$PWD\tools\w64devkit\bin;$env:Path"
@@ -68,28 +78,7 @@ go run -tags fyne_gui ./cmd/narrato
 
 ## 测试
 
-**Pipeline 冒烟（单元/集成，可无 ffmpeg 时部分 Skip）：**
-
 ```powershell
 go test ./internal/pipeline/
-```
-
-全量包测试：
-
-```powershell
 go test ./...
 ```
-
-## Task 13：串联验收（人工）
-
-**准备：** 本机 ffmpeg；可选打开 `resource/projects/女儿`；配置 LLM Key。
-
-1. 新建工程 → 添加 1 个短视频 + srt → 保存  
-2. 生成或粘贴最小 3 行脚本（含 1 段 OST=1）  
-3. 确认预计时长；将目标改为 60s，若超长应出现提示  
-4. 合成出 mp4；原声段无烧录解说字幕、无明显模糊条  
-5. 重开工程，路径与脚本应恢复  
-
-## 设计文档
-
-见仓库 `docs/superpowers/specs/2026-09-24-narrato-golang-client-design.md` 与 `docs/plans/2026-09-24-narrato-golang-client.md`。
