@@ -123,10 +123,7 @@ func Default() *Config {
 			Frames:     8,
 			SegmentSec: 15,
 		},
-		Douyin: Douyin{
-			BaseURL: "http://39.109.101.66:8000",
-			APIKey:  "dtk_0ebb3c9076ad_NVJtZ8xXbGvYWPi1GCkOuFx5hjGwFgZV",
-		},
+		Douyin: Douyin{},
 		Image: ImageGen{
 			Model: "gpt-image-1",
 		},

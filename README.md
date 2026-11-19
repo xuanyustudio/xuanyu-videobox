@@ -82,3 +82,7 @@ go run -tags fyne_gui ./cmd/narrato
 go test ./internal/pipeline/
 go test ./...
 ```
+
+## 联系方式
+
+微信：qiangui8

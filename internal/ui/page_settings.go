@@ -79,7 +79,7 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 
 	dyBaseURL := widget.NewEntry()
 	dyBaseURL.SetText(state.Cfg.Douyin.BaseURL)
-	dyBaseURL.SetPlaceHolder("http://39.109.101.66:8000")
+	dyBaseURL.SetPlaceHolder("例如 http://127.0.0.1:8000")
 	dyAPIKey := widget.NewPasswordEntry()
 	dyAPIKey.SetText(state.Cfg.Douyin.APIKey)
 

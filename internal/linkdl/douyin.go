@@ -17,8 +17,8 @@ var (
 	douyinAPIClient = &http.Client{Timeout: 180 * time.Second}
 
 	douyinMu      sync.RWMutex
-	douyinAPIBase = "http://39.109.101.66:8000"
-	douyinAPIKey  = "dtk_0ebb3c9076ad_NVJtZ8xXbGvYWPi1GCkOuFx5hjGwFgZV"
+	douyinAPIBase = ""
+	douyinAPIKey  = ""
 )
 
 // ConfigureDouyin sets the self-hosted Douyin_TikTok_Download_API endpoint.
@@ -218,7 +218,7 @@ func pollTaskResult(ctx context.Context, initialBody []byte, apiBase, apiKey str
 		case "failed":
 			if task.Error != nil && task.Error.Message != "" {
 				if task.Error.Code == "IDENTITY_LOGIN_REQUIRED" || strings.Contains(string(body), "author_posts") || strings.Contains(task.Error.Message, "author_posts") {
-				return nil, fmt.Errorf("抖音: 作者作品列表需要已登录的抖音账号身份。请打开 http://39.109.101.66:8000 控制台 → Identities → Import，粘贴浏览器里抖音登录后的 Cookie，再重试")
+				return nil, fmt.Errorf("抖音: 作者作品列表需要已登录的抖音账号身份。请打开设置里填写的 Douyin API 控制台 → Identities → Import，粘贴浏览器里抖音登录后的 Cookie，再重试")
 			}
 			return nil, fmt.Errorf("抖音: 任务失败: [%s] %s", task.Error.Code, task.Error.Message)
 			}
@@ -262,7 +262,7 @@ func (d *douyinParser) parseAPIError(body []byte, status int) error {
 		code := strings.TrimSpace(env.Error.Code)
 		msg := strings.TrimSpace(env.Error.Message)
 		if code == "IDENTITY_LOGIN_REQUIRED" || (code == "NOT_FOUND" && strings.Contains(string(body), "author_posts")) {
-			return fmt.Errorf("抖音: 作者作品列表需要已登录的抖音账号身份。请打开 http://39.109.101.66:8000 控制台 → Identities → Import，粘贴浏览器里抖音登录后的 Cookie，再重试")
+			return fmt.Errorf("抖音: 作者作品列表需要已登录的抖音账号身份。请打开设置里填写的 Douyin API 控制台 → Identities → Import，粘贴浏览器里抖音登录后的 Cookie，再重试")
 		}
 		if msg != "" {
 			return fmt.Errorf("抖音: [%s] %s", code, msg)
