@@ -24,7 +24,7 @@ type Params struct {
 	BGMPath     string
 	BGMVolume   float64 // 0–100 preferred; also accepts 0–1
 	// Watermark
-	WatermarkText   string // default Narrato
+	WatermarkText   string // default 玄宇视频工具箱
 	WatermarkCorner string // tl|tr|bl|br
 	// PreviewSeconds > 0 limits output duration (preview mode).
 	PreviewSeconds float64
@@ -33,7 +33,7 @@ type Params struct {
 }
 
 // DefaultWatermarkText is used when watermark is on but text is empty.
-const DefaultWatermarkText = "Narrato"
+const DefaultWatermarkText = "玄宇视频工具箱"
 
 // NormalizeSettings clamps intensities, applies zoom mutual exclusion (last wins),
 // and drops unknown ids. Returns normalized copy and optional notice.

@@ -20,6 +20,7 @@ type Config struct {
 	Douyin    Douyin    `yaml:"douyin" json:"douyin"`
 	Video     Video     `yaml:"video" json:"video"`
 	Image     ImageGen  `yaml:"image" json:"image"`
+	MiniMax   MiniMax   `yaml:"minimax" json:"minimax"`
 }
 
 type LLM struct {
@@ -53,7 +54,7 @@ type UI struct {
 	SubtitleMaskEnabled    bool `yaml:"subtitle_mask_enabled"`
 }
 
-// Replicate holds 爆款复刻 settings: an OpenAI-compatible vision model
+// Replicate holds 提示词提取 / 视频逆向 settings: an OpenAI-compatible vision model
 // (default ModelScope Qwen3-VL, aligned with Python QWEN_API_BASE_URL / QWEN_API_KEY / QWEN_MODEL_ID).
 type Replicate struct {
 	BaseURL    string `yaml:"base_url" json:"base_url"`
@@ -69,7 +70,7 @@ type Douyin struct {
 	APIKey  string `yaml:"api_key" json:"api_key"`
 }
 
-// Video holds the AI 视频工作台 key used by the intro clip.
+// Video holds the AI 视频工作台 key used by 口播视频.
 type Video struct {
 	APIKey string `yaml:"api_key" json:"api_key"`
 }
@@ -77,6 +78,14 @@ type Video struct {
 // ImageGen holds the OpenAI-compatible image edit endpoint used for four-view sheets.
 // APIKey may be empty; the intro page then falls back to the replicate key.
 type ImageGen struct {
+	BaseURL string `yaml:"base_url" json:"base_url"`
+	APIKey  string `yaml:"api_key" json:"api_key"`
+	Model   string `yaml:"model" json:"model"`
+}
+
+// MiniMax holds the 克隆音频 settings for MiniMax voice cloning / T2A.
+// BaseURL and Model may be empty; the client then uses the China defaults.
+type MiniMax struct {
 	BaseURL string `yaml:"base_url" json:"base_url"`
 	APIKey  string `yaml:"api_key" json:"api_key"`
 	Model   string `yaml:"model" json:"model"`

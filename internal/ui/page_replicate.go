@@ -492,7 +492,7 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 		status.SetText(fmt.Sprintf("开始批量提取，共 %d 个…", len(pendingIdx)))
 		state.Cfg.Replicate.SegmentSec = replicate.NormalizeSegmentSec(segSec)
 		if err := config.Save(state.CfgPath, state.Cfg); err != nil {
-			state.Log.Append("[爆款复刻] 保存分段时长失败: " + err.Error())
+			state.Log.Append("[提示词提取] 保存分段时长失败: " + err.Error())
 		}
 
 		go func(indices []int, frames, segSec int) {
@@ -518,7 +518,7 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 					refreshQueue()
 					status.SetText(fmt.Sprintf("[%d/%d] 开始: %s", step+1, total, filepath.Base(path)))
 				})
-				state.Log.Append(fmt.Sprintf("[爆款复刻] [%d/%d] %s", step+1, total, path))
+				state.Log.Append(fmt.Sprintf("[提示词提取] [%d/%d] %s", step+1, total, path))
 
 				params := buildParams(path, frames, segSec, total, step)
 				res, err := replicate.Run(ctx, params)
@@ -528,7 +528,7 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 					errText := err.Error()
 					if !canceled {
 						failCount++
-						state.Log.Append("[爆款复刻] 失败: " + errText)
+						state.Log.Append("[提示词提取] 失败: " + errText)
 					}
 					fyne.Do(func() {
 						if canceled {
@@ -543,7 +543,7 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 					})
 				} else {
 					okCount++
-					state.Log.Append("[爆款复刻] 完成: " + res.OutputDir)
+					state.Log.Append("[提示词提取] 完成: " + res.OutputDir)
 					fyne.Do(func() {
 						jobs[ji].State = "完成"
 						jobs[ji].Result = res
@@ -603,7 +603,7 @@ func newReplicatePage(state *AppState) fyne.CanvasObject {
 	queueScroll.SetMinSize(fyne.NewSize(520, 140))
 
 	body := container.NewVBox(
-		pageTitle("爆款复刻"),
+		pageTitle("提示词提取"),
 		subtitle,
 		toolbar,
 		queueHint,

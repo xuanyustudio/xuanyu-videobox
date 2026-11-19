@@ -15,7 +15,7 @@ func main() {
 	flag.Parse()
 
 	if *cli || os.Getenv("NARRATO_CLI") == "1" {
-		fmt.Fprintf(os.Stdout, "narrato-go %s\n", version)
+		fmt.Fprintf(os.Stdout, "玄宇视频工具箱 %s\n", version)
 		return
 	}
 

@@ -1,6 +1,6 @@
 # narrato-go
 
-NarratoAI 的纯 Go 客户端，与仓库根目录下的 Python + Streamlit 版并行开发，**不替换**现有 `webui.py` 工作流。
+玄宇视频工具箱（仓库名 narrato-go）是 NarratoAI 的纯 Go 客户端，与仓库根目录下的 Python + Streamlit 版并行开发，**不替换**现有 `webui.py` 工作流。
 
 默认界面为**原生 Fyne 窗口**（需本机/仓库内的 MinGW gcc）。仓库已附带便携工具链：`tools/w64devkit`（GCC 14，与 Go CGO 兼容）。
 
@@ -19,7 +19,7 @@ NarratoAI 的纯 Go 客户端，与仓库根目录下的 Python + Streamlit 版�
 
 本地用户配置使用 **`config.yaml`**（与 Python 版 `config.toml` 部分键兼容），存放于用户数据目录或工程旁。密钥仅保存在本机。
 
-「爆款复刻」页签使用 OpenAI 兼容的视觉模型（默认 ModelScope `Qwen/Qwen3-VL-8B-Instruct`），在「设置」中填写 `replicate.base_url` / `replicate.api_key` / `replicate.model`（对应 Python 版 `QWEN_API_BASE_URL` / `QWEN_API_KEY` / `QWEN_MODEL_ID`）；`replicate.frames` 为默认关键帧数（8）。结果（关键帧 + SORA2 中英文提示词）保存在源视频同目录 `replicate_<时间戳>/`。
+「提示词提取」页签使用 OpenAI 兼容的视觉模型（默认 ModelScope `Qwen/Qwen3-VL-8B-Instruct`），在「设置」中填写 `replicate.base_url` / `replicate.api_key` / `replicate.model`（对应 Python 版 `QWEN_API_BASE_URL` / `QWEN_API_KEY` / `QWEN_MODEL_ID`）；`replicate.frames` 为默认关键帧数（8）。结果（关键帧 + SORA2 中英文提示词）保存在源视频同目录 `replicate_<时间戳>/`。
 
 工程目录语义对齐 Python 版：`resource/projects/<slug>/project.json` 及 `exports/` 结构，便于互导与对照验收。
 

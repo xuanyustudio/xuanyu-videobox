@@ -28,6 +28,7 @@ const (
 // IntroOptions generates one intro clip from a reference image and copy.
 type IntroOptions struct {
 	ImagePath  string
+	AudioPath  string
 	Prompt     string
 	OutPath    string
 	APIKey     string
@@ -106,7 +107,8 @@ func GenerateIntro(ctx context.Context, opt IntroOptions) (string, error) {
 	if base == "" {
 		base = DefaultVideoBase
 	}
-	model := strings.TrimSpace(opt.Model)
+	requestedModel := strings.TrimSpace(opt.Model)
+	model := requestedModel
 	if model == "" {
 		model = VideoModel
 	}
@@ -122,21 +124,46 @@ func GenerateIntro(ctx context.Context, opt IntroOptions) (string, error) {
 	if strings.TrimSpace(outPath) == "" {
 		outPath = filepath.Join(filepath.Dir(opt.ImagePath), "intro.mp4")
 	}
+	audioPath := strings.TrimSpace(opt.AudioPath)
 
 	ctx, cancel := context.WithTimeout(ctx, videoWait)
 	defer cancel()
 
-	payload, err := json.Marshal(map[string]any{
+	if audioPath != "" && requestedModel == "" {
+		progress(opt, 4, "正在选择支持参考音频的模型…")
+		models, listErr := ListVideoModels(ctx, base, opt.APIKey, opt.HTTP)
+		if listErr != nil {
+			return "", fmt.Errorf("查询支持参考音频的模型失败: %w", listErr)
+		}
+		picked, pickErr := SuggestAudioModel(models, model, duration, ratio)
+		if pickErr != nil {
+			return "", pickErr
+		}
+		if picked.ID != model {
+			progress(opt, 5, "当前默认模型不支持参考音频，已改用 "+picked.Name+"（"+picked.ID+"）")
+		}
+		model = picked.ID
+	}
+
+	body := map[string]any{
 		"prompt":   prompt,
 		"model":    model,
 		"duration": duration,
 		"ratio":    ratio,
 		"images":   []string{dataURL},
-	})
+	}
+	if audioPath != "" {
+		audioURL, err := audioDataURL(audioPath)
+		if err != nil {
+			return "", err
+		}
+		body["audios"] = []string{audioURL}
+	}
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return "", err
 	}
-	progress(opt, 5, "正在提交介绍片…")
+	progress(opt, 5, "正在提交口播视频…")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/v1/videos", bytes.NewReader(payload))
 	if err != nil {
 		return "", err
@@ -147,22 +174,22 @@ func GenerateIntro(ctx context.Context, opt IntroOptions) (string, error) {
 	client := videoHTTP(opt.HTTP)
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("介绍片请求失败: %w", err)
+		return "", fmt.Errorf("口播视频请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("读取介绍片响应失败: %w", err)
+		return "", fmt.Errorf("读取口播视频响应失败: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("%s", formatVideoHTTPError(resp.StatusCode, raw))
 	}
 	var created videoTask
 	if err := json.Unmarshal(raw, &created); err != nil {
-		return "", fmt.Errorf("介绍片响应无法解析: %w", err)
+		return "", fmt.Errorf("口播视频响应无法解析: %w", err)
 	}
 	if created.ID == "" {
-		return "", fmt.Errorf("介绍片响应缺少任务 id")
+		return "", fmt.Errorf("口播视频响应缺少任务 id")
 	}
 	if len(created.Warnings) > 0 {
 		progress(opt, 8, strings.Join(created.Warnings, "；"))
@@ -183,14 +210,14 @@ func GenerateIntro(ctx context.Context, opt IntroOptions) (string, error) {
 			if err := downloadVideo(ctx, client, base, opt.APIKey, created.ID, outPath); err != nil {
 				return "", err
 			}
-			progress(opt, 100, "介绍片已保存")
+			progress(opt, 100, "口播视频已保存")
 			return outPath, nil
 		case "failed":
 			msg := task.Error.text
 			if msg == "" {
 				msg = "生成失败，额度已退还"
 			}
-			return "", fmt.Errorf("介绍片生成失败: %s", msg)
+			return "", fmt.Errorf("口播视频生成失败: %s", msg)
 		default:
 			p := task.Progress
 			if p < 10 {
@@ -208,7 +235,7 @@ func GenerateIntro(ctx context.Context, opt IntroOptions) (string, error) {
 		select {
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return "", fmt.Errorf("介绍片生成超时")
+				return "", fmt.Errorf("口播视频生成超时")
 			}
 			return "", ctx.Err()
 		case <-time.After(every):
@@ -224,19 +251,19 @@ func fetchVideo(ctx context.Context, client *http.Client, base, apiKey, id strin
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(apiKey))
 	resp, err := client.Do(req)
 	if err != nil {
-		return videoTask{}, fmt.Errorf("查询介绍片失败: %w", err)
+		return videoTask{}, fmt.Errorf("查询口播视频失败: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return videoTask{}, fmt.Errorf("查询介绍片失败: %w", err)
+		return videoTask{}, fmt.Errorf("查询口播视频失败: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return videoTask{}, fmt.Errorf("%s", formatVideoHTTPError(resp.StatusCode, raw))
 	}
 	var task videoTask
 	if err := json.Unmarshal(raw, &task); err != nil {
-		return videoTask{}, fmt.Errorf("介绍片状态无法解析: %w", err)
+		return videoTask{}, fmt.Errorf("口播视频状态无法解析: %w", err)
 	}
 	return task, nil
 }
@@ -250,7 +277,7 @@ func downloadVideo(ctx context.Context, client *http.Client, base, apiKey, id, o
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(apiKey))
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("下载介绍片失败: %w", err)
+		return fmt.Errorf("下载口播视频失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -268,11 +295,11 @@ func downloadVideo(ctx context.Context, client *http.Client, base, apiKey, id, o
 	n, err := io.Copy(f, resp.Body)
 	if err != nil {
 		os.Remove(outPath)
-		return fmt.Errorf("保存介绍片失败: %w", err)
+		return fmt.Errorf("保存口播视频失败: %w", err)
 	}
 	if n == 0 {
 		os.Remove(outPath)
-		return fmt.Errorf("下载到的介绍片是空文件")
+		return fmt.Errorf("下载到的口播视频是空文件")
 	}
 	return nil
 }
@@ -290,6 +317,28 @@ func imageDataURL(path string) (string, error) {
 		mime = "image/webp"
 	case ".gif":
 		mime = "image/gif"
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
+}
+
+func audioDataURL(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("读取参考音频失败: %w", err)
+	}
+	if len(data) == 0 {
+		return "", fmt.Errorf("参考音频是空文件")
+	}
+	mime := "audio/mpeg"
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".wav":
+		mime = "audio/wav"
+	case ".m4a", ".mp4", ".aac":
+		mime = "audio/mp4"
+	case ".ogg":
+		mime = "audio/ogg"
+	case ".flac":
+		mime = "audio/flac"
 	}
 	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
@@ -328,6 +377,6 @@ func formatVideoHTTPError(code int, body []byte) string {
 		if msg == "" {
 			msg = truncate(string(body), 240)
 		}
-		return fmt.Sprintf("介绍片请求失败（HTTP %d）: %s", code, msg)
+		return fmt.Sprintf("口播视频请求失败（HTTP %d）: %s", code, msg)
 	}
 }

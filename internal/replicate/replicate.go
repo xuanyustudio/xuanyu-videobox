@@ -1,4 +1,4 @@
-// Package replicate implements 爆款复刻: sample keyframes from a reference video,
+// Package replicate implements 提示词提取: sample keyframes from a reference video,
 // ask a vision model (default Qwen3-VL via ModelScope) to write SORA2-style
 // replication prompts, and save prompts + keyframes beside the source video.
 // Ported from the Python AI-video-Replicate project (qwen3vl.py / app.py).
@@ -85,7 +85,7 @@ func Validate(p Params) error {
 		return fmt.Errorf("请先选择视频")
 	}
 	if strings.TrimSpace(p.APIKey) == "" {
-		return fmt.Errorf("请先在「设置」中填写爆款复刻 API Key")
+		return fmt.Errorf("请先在「设置」中填写视觉模型 API Key")
 	}
 	return nil
 }

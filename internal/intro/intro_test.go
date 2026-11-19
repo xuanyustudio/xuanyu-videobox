@@ -234,7 +234,7 @@ func TestGenerateIntro(t *testing.T) {
 		t.Fatalf("file %q err=%v", body, err)
 	}
 	joined := strings.Join(msgs, "|")
-	if !strings.Contains(joined, "已按默认生成") || !strings.Contains(joined, "介绍片已保存") {
+	if !strings.Contains(joined, "已按默认生成") || !strings.Contains(joined, "口播视频已保存") {
 		t.Fatalf("progress %v", msgs)
 	}
 }
@@ -349,5 +349,112 @@ func TestOutputDir(t *testing.T) {
 	got := intro.OutputDir(`E:\clips\role.png`, time.Date(2026, 10, 15, 10, 46, 0, 0, time.UTC))
 	if !strings.HasSuffix(filepath.ToSlash(got), "clips/intro_20261015_104600") {
 		t.Fatalf("got %s", got)
+	}
+}
+
+func TestSpokenLines(t *testing.T) {
+	got := intro.SpokenLines(intro.DefaultIntroPrompt)
+	for _, want := range []string{
+		"大家好，我是林晚。这是我的新剧《月光收藏家》。",
+		"我演一个把秘密藏进笑里的人。",
+		"如果你也曾把喜欢说得太轻",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in %q", want, got)
+		}
+	}
+	if strings.Contains(got, "15秒竖屏") || strings.Contains(got, "参考图") || strings.Contains(got, "0到4秒") {
+		t.Fatalf("should omit directions: %q", got)
+	}
+	if intro.SpokenLines("") != "" {
+		t.Fatal("empty")
+	}
+	if got := intro.SpokenLines("就是这句口播。"); got != "就是这句口播。" {
+		t.Fatalf("plain=%q", got)
+	}
+}
+
+func TestSuggestAudioModel(t *testing.T) {
+	models := []intro.VideoModelInfo{
+		{ID: "wb-seedance-2-fast", Name: "2.0 Fast", SupportsImage: true, SupportsAudio: false, MaxAudios: 0, Durations: []int{4, 5, 10}},
+		{ID: "expensive-full", Name: "Full", SupportsImage: true, SupportsAudio: true, MaxAudios: 3, Durations: []int{15}, UnitPrice: 70},
+		{ID: "yk-seedance2.0-fast", Name: "Fast 15s", SupportsImage: true, SupportsAudio: true, MaxAudios: 3, Durations: []int{4, 5, 15}, UnitPrice: 2.5},
+		{ID: "no-15s", Name: "Short", SupportsImage: true, SupportsAudio: true, MaxAudios: 3, Durations: []int{4, 5, 10}, UnitPrice: 1},
+	}
+	got, err := intro.SuggestAudioModel(models, "wb-seedance-2-fast", 15, "9:16")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "yk-seedance2.0-fast" {
+		t.Fatalf("picked %s", got.ID)
+	}
+	if _, err := intro.SuggestAudioModel(models[:1], "", 15, "9:16"); err == nil {
+		t.Fatal("expected error when none support audio")
+	}
+}
+
+func TestGenerateIntroWithAudio(t *testing.T) {
+	var gotAudios []string
+	var gotModel string
+	listed := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/models":
+			listed = true
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"id": "wb-seedance-2-fast", "name": "2.0 Fast", "supports_image": true, "supports_audio": false, "max_audios": 0, "durations": []int{10}},
+					{"id": "yk-seedance2.0-fast", "name": "Fast 15s", "supports_image": true, "supports_audio": true, "max_audios": 3, "durations": []int{15}, "unit_price": 2.5, "ratios": []map[string]string{{"ratio": "9:16"}}},
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/videos":
+			var body struct {
+				Model  string   `json:"model"`
+				Audios []string `json:"audios"`
+				Images []string `json:"images"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			gotAudios, gotModel = body.Audios, body.Model
+			if len(body.Images) != 1 {
+				t.Errorf("images=%d", len(body.Images))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "jobA", "status": "queued"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/videos/jobA":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "jobA", "status": "completed", "progress": 100})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/videos/jobA/content":
+			_, _ = w.Write([]byte("mp4"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "role.png")
+	audio := filepath.Join(dir, "ref.mp3")
+	if err := os.WriteFile(src, []byte("img"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(audio, []byte("mp3data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "intro.mp4")
+	got, err := intro.GenerateIntro(context.Background(), intro.IntroOptions{
+		ImagePath: src,
+		AudioPath: audio,
+		Prompt:    "片头",
+		OutPath:   out,
+		APIKey:    "vw_test",
+		BaseURL:   srv.URL,
+		HTTP:      srv.Client(),
+		PollEvery: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != out || !listed || gotModel != "yk-seedance2.0-fast" || len(gotAudios) != 1 || !strings.HasPrefix(gotAudios[0], "data:audio/mpeg;base64,") {
+		t.Fatalf("got=%s listed=%v model=%s audios=%v", got, listed, gotModel, gotAudios)
 	}
 }

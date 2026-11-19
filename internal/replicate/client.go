@@ -68,7 +68,7 @@ func (c *Client) Analyze(ctx context.Context, systemPrompt, userPrompt string, f
 		return "", fmt.Errorf("replicate: nil client")
 	}
 	if strings.TrimSpace(c.APIKey) == "" {
-		return "", fmt.Errorf("请先在「设置」中填写爆款复刻 API Key")
+		return "", fmt.Errorf("请先在「设置」中填写视觉模型 API Key")
 	}
 	base := strings.TrimSpace(c.BaseURL)
 	if base == "" {
@@ -144,14 +144,14 @@ func formatHTTPError(code int, body []byte) string {
 	}
 	switch code {
 	case 401, 403:
-		return fmt.Sprintf("爆款复刻鉴权失败（HTTP %d），请检查设置里的「复刻 API Key」", code)
+		return fmt.Sprintf("视觉模型鉴权失败（HTTP %d），请检查设置里的「视觉模型 API Key」", code)
 	case 404:
-		return fmt.Sprintf("爆款复刻接口不存在（HTTP %d），请检查「复刻 Base URL」是否以 /v1 结尾，以及模型名是否正确", code)
+		return fmt.Sprintf("视觉模型接口不存在（HTTP %d），请检查「视觉模型 Base URL」是否以 /v1 结尾，以及模型名是否正确", code)
 	case 413:
 		return fmt.Sprintf("请求体过大（HTTP %d），请减少关键帧数量", code)
 	case 429:
-		return fmt.Sprintf("爆款复刻请求过于频繁或额度用尽（HTTP %d），请稍后重试", code)
+		return fmt.Sprintf("视觉模型请求过于频繁或额度用尽（HTTP %d），请稍后重试", code)
 	default:
-		return fmt.Sprintf("爆款复刻请求失败（HTTP %d）: %s", code, string(msg))
+		return fmt.Sprintf("视觉模型请求失败（HTTP %d）: %s", code, string(msg))
 	}
 }

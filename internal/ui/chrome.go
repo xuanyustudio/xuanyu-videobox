@@ -167,7 +167,7 @@ func newRail(items []railItem) (rail, content fyne.CanvasObject) {
 		btns[idx] = btn
 	}
 
-	mark := widget.NewLabelWithStyle("Narrato", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	mark := widget.NewLabelWithStyle("玄宇视频工具箱", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	mark.SizeName = theme.SizeNameSubHeadingText
 	tag := widget.NewLabel("短剧工作台")
 	tag.Importance = widget.LowImportance

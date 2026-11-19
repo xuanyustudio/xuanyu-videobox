@@ -32,8 +32,8 @@ func TestReplicateFrameWithoutResult(t *testing.T) {
 }
 
 func TestIndexHasReplicateTab(t *testing.T) {
-	if !strings.Contains(indexHTML, `data-tab="replicate">爆款复刻`) || !strings.Contains(indexHTML, `id="repApiKey"`) {
-		t.Fatal("index.html missing 爆款复刻 tab or settings")
+	if !strings.Contains(indexHTML, `data-tab="replicate">提示词提取`) || !strings.Contains(indexHTML, `id="repApiKey"`) {
+		t.Fatal("index.html missing 提示词提取 tab or settings")
 	}
 	if !strings.Contains(indexHTML, `id="repPromptZh"`) || !strings.Contains(indexHTML, `data-prompt-tab="zh"`) {
 		t.Fatal("index.html missing SORA2 Chinese prompt tab")

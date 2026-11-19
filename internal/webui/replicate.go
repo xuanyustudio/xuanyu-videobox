@@ -12,7 +12,7 @@ import (
 	"github.com/narratoai/narrato-go/internal/replicate"
 )
 
-// handleReplicateRun runs 爆款复刻 synchronously (like /api/script/generate).
+// handleReplicateRun runs 提示词提取 synchronously (like /api/script/generate).
 func (s *server) handleReplicateRun(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", 405)
@@ -64,7 +64,7 @@ func (s *server) handleReplicateRun(w http.ResponseWriter, r *http.Request) {
 			FFprobe: cfg.FFmpeg.FFprobePath,
 		},
 		OnProgress: func(percent int, msg string) {
-			s.appendLog("[爆款复刻] " + msg)
+			s.appendLog("[提示词提取] " + msg)
 		},
 	}
 	if err := replicate.Validate(params); err != nil {
@@ -118,7 +118,7 @@ func (s *server) handleReplicateRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleReplicateFrame serves keyframe ?i=N of the last 爆款复刻 result.
+// handleReplicateFrame serves keyframe ?i=N of the last 提示词提取 result.
 func (s *server) handleReplicateFrame(w http.ResponseWriter, r *http.Request) {
 	i, err := strconv.Atoi(r.URL.Query().Get("i"))
 	s.mu.Lock()

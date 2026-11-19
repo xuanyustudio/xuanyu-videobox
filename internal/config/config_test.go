@@ -120,3 +120,24 @@ func TestImageGenDefaultsAndRoundTrip(t *testing.T) {
 		t.Fatalf("got %#v", got.Image)
 	}
 }
+
+func TestMiniMaxDefaultsAndRoundTrip(t *testing.T) {
+	cfg := config.Default()
+	if cfg.MiniMax.APIKey != "" || cfg.MiniMax.BaseURL != "" || cfg.MiniMax.Model != "" {
+		t.Fatalf("minimax defaults: %#v", cfg.MiniMax)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg.MiniMax.BaseURL = "https://api.minimax.cn"
+	cfg.MiniMax.APIKey = "mm-test"
+	cfg.MiniMax.Model = "speech-2.8-hd"
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MiniMax.BaseURL != cfg.MiniMax.BaseURL || got.MiniMax.APIKey != "mm-test" || got.MiniMax.Model != "speech-2.8-hd" {
+		t.Fatalf("got %#v", got.MiniMax)
+	}
+}

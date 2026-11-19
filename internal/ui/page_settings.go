@@ -89,16 +89,26 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 
 	imgBaseURL := widget.NewEntry()
 	imgBaseURL.SetText(state.Cfg.Image.BaseURL)
-	imgBaseURL.SetPlaceHolder("留空则使用复刻 Base URL")
+	imgBaseURL.SetPlaceHolder("留空则使用视觉模型 Base URL")
 	imgAPIKey := widget.NewPasswordEntry()
 	imgAPIKey.SetText(state.Cfg.Image.APIKey)
-	imgAPIKey.SetPlaceHolder("留空则使用复刻 API Key")
+	imgAPIKey.SetPlaceHolder("留空则使用视觉模型 API Key")
 	imgModel := widget.NewEntry()
 	imgModel.SetText(state.Cfg.Image.Model)
 	if strings.TrimSpace(imgModel.Text) == "" {
 		imgModel.SetText("gpt-image-1")
 	}
 	imgModel.SetPlaceHolder("gpt-image-2")
+
+	mmBaseURL := widget.NewEntry()
+	mmBaseURL.SetText(state.Cfg.MiniMax.BaseURL)
+	mmBaseURL.SetPlaceHolder("https://api.minimax.cn")
+	mmAPIKey := widget.NewPasswordEntry()
+	mmAPIKey.SetText(state.Cfg.MiniMax.APIKey)
+	mmAPIKey.SetPlaceHolder("在 MiniMax 开放平台申请的接口密钥")
+	mmModel := widget.NewEntry()
+	mmModel.SetText(state.Cfg.MiniMax.Model)
+	mmModel.SetPlaceHolder("speech-2.8-hd")
 
 	hideCheck := widget.NewCheck("原片段隐藏解说字幕", func(bool) {})
 	hideCheck.SetChecked(state.Cfg.UI.SubtitleHideOnOriginal)
@@ -185,6 +195,9 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 		state.Cfg.Image.BaseURL = strings.TrimSpace(imgBaseURL.Text)
 		state.Cfg.Image.APIKey = strings.TrimSpace(imgAPIKey.Text)
 		state.Cfg.Image.Model = strings.TrimSpace(imgModel.Text)
+		state.Cfg.MiniMax.BaseURL = strings.TrimSpace(mmBaseURL.Text)
+		state.Cfg.MiniMax.APIKey = strings.TrimSpace(mmAPIKey.Text)
+		state.Cfg.MiniMax.Model = strings.TrimSpace(mmModel.Text)
 		linkdl.ConfigureDouyin(state.Cfg.Douyin.BaseURL, state.Cfg.Douyin.APIKey)
 		if err := config.Save(state.CfgPath, state.Cfg); err != nil {
 			status.SetText(fmt.Sprintf("保存失败: %v", err))
@@ -199,6 +212,12 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 	videoLinks := container.NewHBox(
 		widget.NewHyperlink("打开工作台", workbenchURL),
 		widget.NewHyperlink("接口文档", docsURL),
+	)
+	mmKeyURL, _ := url.Parse("https://platform.minimax.cn/user-center/basic-information/interface-key")
+	mmDocsURL, _ := url.Parse("https://platform.minimax.cn/docs/guides/speech-voice-clone")
+	mmLinks := container.NewHBox(
+		widget.NewHyperlink("申请密钥", mmKeyURL),
+		widget.NewHyperlink("复刻说明", mmDocsURL),
 	)
 
 	cfgPath := widget.NewLabel("配置文件：" + state.CfgPath)
@@ -219,7 +238,7 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 			settingsForm(widget.NewLabel("识别方式"), backend),
 			asrBody,
 		)),
-		settingsCard("爆款复刻", "默认 ModelScope Qwen3-VL", settingsForm(
+		settingsCard("提示词提取", "与视频逆向共用视觉模型，默认 ModelScope Qwen3-VL", settingsForm(
 			widget.NewLabel("Base URL"), repBaseURL,
 			widget.NewLabel("API Key"), repAPIKey,
 			widget.NewLabel("视觉模型"), repModel,
@@ -228,10 +247,15 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 			widget.NewLabel("API 地址"), dyBaseURL,
 			widget.NewLabel("API Key"), dyAPIKey,
 		)),
-		settingsCard("介绍片", "额度与网页端共用", settingsForm(
+		settingsCard("口播视频", "额度与网页端共用", settingsForm(
 			widget.NewLabel("视频 API Key"), container.NewBorder(nil, nil, nil, videoLinks, videoKey),
 		)),
-		settingsCard("生图", "四视图使用；地址或密钥留空时沿用复刻设置", settingsForm(
+		settingsCard("克隆音频", "使用 MiniMax 音色复刻，国内默认 api.minimax.cn", settingsForm(
+			widget.NewLabel("API 地址"), mmBaseURL,
+			widget.NewLabel("API Key"), container.NewBorder(nil, nil, nil, mmLinks, mmAPIKey),
+			widget.NewLabel("合成模型"), mmModel,
+		)),
+		settingsCard("生图", "四视图使用；地址或密钥留空时沿用视觉模型设置", settingsForm(
 			widget.NewLabel("Base URL"), imgBaseURL,
 			widget.NewLabel("API Key"), imgAPIKey,
 			widget.NewLabel("模型"), imgModel,

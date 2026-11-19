@@ -19,14 +19,14 @@
     "FileSubType": "00"
   },
   "StringFileInfo": {
-    "Comments": "Narrato short-drama desktop client",
-    "CompanyName": "NarratoAI",
-    "FileDescription": "Narrato",
+    "Comments": "玄宇视频工具箱桌面客户端",
+    "CompanyName": "玄宇",
+    "FileDescription": "玄宇视频工具箱",
     "FileVersion": "0.1.0",
     "InternalName": "narrato",
     "LegalCopyright": "",
-    "OriginalFilename": "narrato.exe",
-    "ProductName": "Narrato",
+    "OriginalFilename": "玄宇视频工具箱.exe",
+    "ProductName": "玄宇视频工具箱",
     "ProductVersion": "0.1.0"
   },
   "VarFileInfo": {

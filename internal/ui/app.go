@@ -69,7 +69,7 @@ func Run() {
 
 	a := app.NewWithID("com.narratoai.narrato-go")
 	a.Settings().SetTheme(newNarratoTheme())
-	w := a.NewWindow("Narrato")
+	w := a.NewWindow("玄宇视频工具箱")
 	w.Resize(fyne.NewSize(1180, 760))
 	w.SetMaster()
 
@@ -88,6 +88,8 @@ func Run() {
 	settingsPage := newSettingsPage(state)
 	originalPage := newOriginalPage(state)
 	replicatePage := newReplicatePage(state)
+	reversePage := newReversePage(state)
+	hookPage := newHookPage(state)
 	abSplicePage := newABSplicePage(state)
 	linkDLPage := newLinkDownloadPage(state)
 
@@ -121,7 +123,7 @@ func Run() {
 		projectPage.Show()
 		homeStack.Refresh()
 		refreshProject()
-		w.SetTitle("Narrato")
+		w.SetTitle("玄宇视频工具箱")
 		if state.Project != nil {
 			statusBar.SetText("工程列表。可重新打开: " + state.Project.Name)
 		} else {
@@ -137,7 +139,7 @@ func Run() {
 			name = state.Project.Slug
 		}
 		projTitle.SetText(name)
-		w.SetTitle("Narrato - " + name)
+		w.SetTitle("玄宇视频工具箱 - " + name)
 		projectPage.Hide()
 		workspaceView.Show()
 		homeStack.Refresh()
@@ -153,18 +155,24 @@ func Run() {
 
 	atlasPage := newAtlasPage()
 	introPage := newIntroPage(state)
+	voiceClonePage := newVoiceClonePage(state)
 	audioPage := newAudioSplitPage(state)
 	subtitlePage := newSubtitlePage(state)
+	mergePage := newMergePage(state)
 	rail, content := newRail([]railItem{
 		{Label: "短剧解说", Icon: theme.MediaVideoIcon(), Page: homeStack},
 		{Label: "一键原创", Icon: theme.ColorChromaticIcon(), Page: originalPage},
-		{Label: "爆款复刻", Icon: theme.ContentCopyIcon(), Page: replicatePage},
+		{Label: "提示词提取", Icon: theme.ContentCopyIcon(), Page: replicatePage},
+		{Label: "视频逆向", Icon: theme.ViewRefreshIcon(), Page: reversePage},
+		{Label: "爆点开头", Icon: theme.MediaPlayIcon(), Page: hookPage},
 		{Label: "链接下载", Icon: theme.DownloadIcon(), Page: linkDLPage},
 		{Label: "AB 拼接", Icon: theme.ContentCutIcon(), Page: abSplicePage},
 		{Label: "手法图鉴", Icon: theme.DocumentIcon(), Page: atlasPage},
-		{Label: "介绍片", Icon: theme.MediaPhotoIcon(), Page: introPage},
+		{Label: "口播视频", Icon: theme.MediaPhotoIcon(), Page: introPage},
+		{Label: "克隆音频", Icon: theme.MediaMusicIcon(), Page: voiceClonePage},
 		{Label: "音频分离", Icon: theme.FileAudioIcon(), Page: audioPage},
 		{Label: "加字幕", Icon: theme.FileIcon(), Page: subtitlePage},
+		{Label: "视频合并", Icon: theme.MediaFastForwardIcon(), Page: mergePage},
 		{Label: "设置", Icon: theme.SettingsIcon(), Page: settingsPage},
 	})
 

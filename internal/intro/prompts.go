@@ -1,12 +1,17 @@
 package intro
 
+import (
+	"regexp"
+	"strings"
+)
+
 // PromptTemplate is one editable actor-intro script for a 15-second clip.
 type PromptTemplate struct {
 	Name string
 	Text string
 }
 
-const promptLead = "15秒竖屏介绍片。参考图如果是角色四视图，只让最左侧正面的演员出镜说话，不要把四格同时拍进画面。演员本人看向镜头，口型与台词严格对齐，语速自然，把下面的台词说满15秒。五官、发型、服装与参考图一致。电影感灯光，浅景深，无画面字幕，无水印。"
+const promptLead = "15秒竖屏口播视频。参考图如果是角色四视图，只让最左侧正面的演员出镜说话，不要把四格同时拍进画面。演员本人看向镜头，口型与台词严格对齐，语速自然，把下面的台词说满15秒。五官、发型、服装与参考图一致。电影感灯光，浅景深，无画面字幕，无水印。"
 
 // PromptTemplates are the five default actor-intro scripts. Users can edit the text after choosing one.
 func PromptTemplates() []PromptTemplate {
@@ -65,4 +70,30 @@ func PromptByName(name string) string {
 		}
 	}
 	return DefaultIntroPrompt
+}
+
+var spokenLineRe = regexp.MustCompile(`台词[：:]\s*[「“"']([^」”"']+)[」”"']`)
+
+// SpokenLines extracts the actor's spoken lines from an intro prompt.
+// Camera directions and the shared lead sentence are omitted, so the
+// text can be sent to TTS as a reference performance.
+func SpokenLines(prompt string) string {
+	s := strings.TrimSpace(prompt)
+	if s == "" {
+		return ""
+	}
+	rest := s
+	if strings.HasPrefix(rest, promptLead) {
+		rest = strings.TrimSpace(rest[len(promptLead):])
+	}
+	var lines []string
+	for _, m := range spokenLineRe.FindAllStringSubmatch(rest, -1) {
+		if line := strings.TrimSpace(m[1]); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) > 0 {
+		return strings.Join(lines, "")
+	}
+	return strings.TrimSpace(rest)
 }

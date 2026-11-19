@@ -9,7 +9,7 @@ import (
 
 func fatalBox(msg string) {
 	fmt.Fprintln(os.Stderr, msg)
-	showMessageBox("Narrato", msg)
+	showMessageBox("玄宇视频工具箱", msg)
 }
 
 func showMessageBox(title, text string) {

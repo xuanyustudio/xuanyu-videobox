@@ -100,12 +100,12 @@ func Run() {
 		os.Exit(1)
 	}
 	addr := "http://" + ln.Addr().String()
-	fmt.Fprintf(os.Stdout, "Narrato 已启动：%s\n请在浏览器中使用（关闭本窗口将停止服务）。\n", addr)
+	fmt.Fprintf(os.Stdout, "玄宇视频工具箱已启动：%s\n请在浏览器中使用（关闭本窗口将停止服务）。\n", addr)
 
 	go func() {
 		time.Sleep(400 * time.Millisecond)
 		_ = openBrowser(addr)
-		infoBox("Narrato", "界面已在默认浏览器打开：\n"+addr+"\n\n请保持本程序运行；关闭托盘/后台进程后页面将不可用。")
+		infoBox("玄宇视频工具箱", "界面已在默认浏览器打开：\n"+addr+"\n\n请保持本程序运行；关闭托盘/后台进程后页面将不可用。")
 	}()
 
 	srv := &http.Server{Handler: mux}

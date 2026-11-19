@@ -4,6 +4,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,30 @@ import (
 	"github.com/narratoai/narrato-go/internal/intro"
 	"github.com/narratoai/narrato-go/internal/media"
 	"github.com/narratoai/narrato-go/internal/replicate"
+	"github.com/narratoai/narrato-go/internal/voiceclone"
 )
+
+func copyLocalRefAudio(src, dir string) (string, error) {
+	ext := strings.ToLower(filepath.Ext(src))
+	if ext == "" {
+		ext = ".mp3"
+	}
+	dest := filepath.Join(dir, "voice_ref"+ext)
+	if filepath.Clean(src) == filepath.Clean(dest) {
+		return dest, nil
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return "", fmt.Errorf("读取本地参考音频失败: %w", err)
+	}
+	if len(data) == 0 {
+		return "", fmt.Errorf("本地参考音频是空文件")
+	}
+	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		return "", fmt.Errorf("保存本地参考音频失败: %w", err)
+	}
+	return dest, nil
+}
 
 func newIntroPage(state *AppState) fyne.CanvasObject {
 	imagePath := ""
@@ -53,7 +77,7 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 	}
 	promptEntry := widget.NewMultiLineEntry()
 	promptEntry.Wrapping = fyne.TextWrapWord
-	promptEntry.SetMinRowsVisible(8)
+	promptEntry.SetMinRowsVisible(6)
 	tplSelect := widget.NewSelect(tplLabels, func(name string) {
 		promptEntry.SetText(intro.PromptByName(name))
 	})
@@ -93,6 +117,13 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 	}
 
 	var fourBtn, videoBtn, cancelBtn *widget.Button
+	var picker *voicePicker
+
+	setCancel := func(fn context.CancelFunc) {
+		runMu.Lock()
+		cancelRun = fn
+		runMu.Unlock()
+	}
 
 	setBusy := func(v bool) {
 		busy = v
@@ -101,12 +132,18 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 			videoBtn.Disable()
 			cancelBtn.Enable()
 			openOutBtn.Disable()
+			if picker != nil {
+				picker.SetEnabled(false)
+			}
 		} else {
 			fourBtn.Enable()
 			videoBtn.Enable()
 			cancelBtn.Disable()
 			if outDir != "" {
 				openOutBtn.Enable()
+			}
+			if picker != nil {
+				picker.SetEnabled(true)
 			}
 		}
 	}
@@ -167,6 +204,9 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 		progress.SetValue(0)
 		status.SetText("")
 		openOutBtn.Disable()
+		if picker != nil {
+			picker.ClearSelection()
+		}
 	})
 	clearBtn.Importance = widget.LowImportance
 
@@ -214,6 +254,30 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 		prompt := promptEntry.Text
 		videoKey := state.Cfg.Video.APIKey
 		src := imagePath
+		var (
+			voiceID    string
+			voiceLabel string
+			reuseAudio string
+			spoken     string
+			useVoice   bool
+			localAudio string
+		)
+		if picker != nil && kind != "four" {
+			v, preview, ok := picker.Selection()
+			if ok {
+				useVoice = true
+				voiceID = v.ID
+				voiceLabel = v.Display()
+				spoken = intro.SpokenLines(prompt)
+				reuseAudio = picker.PreviewFor(spoken)
+				if reuseAudio == "" {
+					reuseAudio = preview
+				}
+			} else if path, ok := picker.UploadedAudio(); ok {
+				localAudio = path
+				voiceLabel = filepath.Base(path)
+			}
+		}
 		runMu.Unlock()
 
 		progress.SetValue(5)
@@ -233,7 +297,7 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 			case "four":
 				statusText := "正在生成四视图…"
 				fyne.Do(func() { status.SetText(statusText) })
-				state.Log.Append("[介绍片] 四视图 " + src)
+				state.Log.Append("[口播视频] 四视图 " + src)
 				saved, runErr = intro.GenerateFourView(ctx, intro.FourViewOptions{
 					ImagePath: src,
 					OutPath:   filepath.Join(dir, "fourview.png"),
@@ -242,15 +306,59 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 					Model:     imageModel,
 				})
 			default:
-				state.Log.Append("[介绍片] 视频 " + ref)
-				saved, runErr = intro.GenerateIntro(ctx, intro.IntroOptions{
-					ImagePath:  ref,
-					Prompt:     prompt,
-					OutPath:    filepath.Join(dir, "intro.mp4"),
-					APIKey:     videoKey,
-					Duration:   intro.VideoDuration,
-					OnProgress: onProgress,
-				})
+				audioPath := ""
+				if useVoice {
+					if strings.TrimSpace(spoken) == "" {
+						runErr = fmt.Errorf("请填写介绍文案，才能按参考音色合成试听音频")
+					} else if reuseAudio != "" && picker.PreviewFor(spoken) == reuseAudio {
+						audioPath = reuseAudio
+					} else if reuseAudio != "" && spoken != "" {
+						// Prefer a fresh performance of the current copy when the
+						// existing preview was made with different text.
+						audioPath = ""
+					}
+					if runErr == nil && audioPath == "" {
+						onProgress(6, "正在按参考音色合成试听音频…")
+						state.Log.Append("[口播视频] 合成参考音频 " + voiceID)
+						client := &voiceclone.Client{
+							BaseURL: state.Cfg.MiniMax.BaseURL,
+							APIKey:  strings.TrimSpace(state.Cfg.MiniMax.APIKey),
+							Model:   strings.TrimSpace(state.Cfg.MiniMax.Model),
+						}
+						var result *voiceclone.SynthesizeResult
+						result, runErr = client.Synthesize(ctx, voiceID, spoken)
+						if runErr == nil {
+							audioPath = filepath.Join(dir, "voice_ref."+extOrMP3(result.Format))
+							runErr = os.WriteFile(audioPath, result.Audio, 0o644)
+							if runErr == nil {
+								picker.rememberPreview(audioPath, spoken)
+							}
+						}
+					} else if runErr == nil && audioPath != "" {
+						state.Log.Append("[口播视频] 使用已有试听音频 " + audioPath)
+					}
+				} else if localAudio != "" {
+					onProgress(6, "正在使用本地参考音频…")
+					audioPath, runErr = copyLocalRefAudio(localAudio, dir)
+					if runErr == nil {
+						state.Log.Append("[口播视频] 使用本地参考音频 " + audioPath)
+					}
+				}
+				if runErr == nil {
+					state.Log.Append("[口播视频] 视频 " + ref)
+					if audioPath != "" {
+						state.Log.Append("[口播视频] 参考音频 " + audioPath + "（" + voiceLabel + "）")
+					}
+					saved, runErr = intro.GenerateIntro(ctx, intro.IntroOptions{
+						ImagePath:  ref,
+						AudioPath:  audioPath,
+						Prompt:     prompt,
+						OutPath:    filepath.Join(dir, "intro.mp4"),
+						APIKey:     videoKey,
+						Duration:   intro.VideoDuration,
+						OnProgress: onProgress,
+					})
+				}
 			}
 			fyne.Do(func() {
 				runMu.Lock()
@@ -264,7 +372,7 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 						return
 					}
 					status.SetText(runErr.Error())
-					state.Log.Append("[介绍片] 失败: " + runErr.Error())
+					state.Log.Append("[口播视频] 失败: " + runErr.Error())
 					dialog.ShowError(runErr, state.Win)
 					return
 				}
@@ -274,17 +382,17 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 					showImage(fourBox, saved)
 					fourHint.SetText("四视图: " + saved)
 					status.SetText("四视图已保存: " + saved)
-					state.Log.Append("[介绍片] 四视图完成: " + saved)
+					state.Log.Append("[口播视频] 四视图完成: " + saved)
 					return
 				}
-				status.SetText("介绍片已保存: " + saved)
-				state.Log.Append("[介绍片] 视频完成: " + saved)
+				status.SetText("口播视频已保存: " + saved)
+				state.Log.Append("[口播视频] 视频完成: " + saved)
 			})
 		}()
 	}
 
 	fourBtn = widget.NewButton("生成四视图", func() { start("four") })
-	videoBtn = widget.NewButton("生成介绍片", func() { start("video") })
+	videoBtn = widget.NewButton("生成口播视频", func() { start("video") })
 	videoBtn.Importance = widget.HighImportance
 	cancelBtn = widget.NewButton("取消", func() {
 		runMu.Lock()
@@ -295,7 +403,7 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 	})
 	cancelBtn.Disable()
 
-	hint := widget.NewLabel("四视图使用「设置」底部的生图地址和生图模型。介绍片默认用四视图做参考，固定 15 秒竖屏。换模板会覆盖文案，改完的字会按你写的生成。")
+	hint := widget.NewLabel("四视图使用「设置」底部的生图地址和生图模型。口播视频默认用四视图做参考，固定 15 秒竖屏。换模板会覆盖文案，改完的字会按你写的生成。参考音色可留空；选了列表里的音色后会先按介绍文案合成试听，再把这段音频作为参考音提交。也可以点「上传音色」直接选用本地 wav、mp3 等音频，不必先查询。查询或选用列表音色时请先在「设置」里填写 MiniMax API Key。若当前默认视频模型不支持参考音频，生成时会自动改用账号里可用的模型。")
 	hint.Wrapping = fyne.TextWrapWord
 	hint.Importance = widget.LowImportance
 
@@ -306,8 +414,13 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 		container.NewVBox(sec("参考图"), sourceHint, sourceBox),
 		container.NewVBox(sec("四视图"), fourHint, fourBox),
 	)
-	body := container.NewVBox(
-		pageTitle("介绍片"),
+
+	picker = newVoicePicker(state, progress, status, func() string {
+		return intro.SpokenLines(promptEntry.Text)
+	}, func() bool { return busy }, setBusy, setCancel)
+
+	top := container.NewVBox(
+		pageTitle("口播视频"),
 		subtitle,
 		container.NewBorder(nil, nil, toolbar, nil, imageLabel),
 		progress,
@@ -318,7 +431,6 @@ func newIntroPage(state *AppState) fyne.CanvasObject {
 		sec("介绍文案"),
 		container.NewBorder(nil, nil, widget.NewLabel("模板"), nil, tplSelect),
 		promptEntry,
-		hint,
 	)
-	return container.NewVScroll(body)
+	return container.NewBorder(container.NewPadded(top), container.NewPadded(hint), nil, nil, picker.root)
 }

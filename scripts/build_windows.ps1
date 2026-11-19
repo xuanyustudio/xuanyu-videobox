@@ -33,8 +33,8 @@ $env:GOOS      = 'windows'
 $env:GOARCH    = 'amd64'
 
 Write-Host ""
-Write-Host "[1/3] Building native Fyne GUI -> dist\narrato.exe (with AB Splice Tab)" -ForegroundColor Cyan
-go build -tags fyne_gui -ldflags "-H windowsgui -s -w" -o (Join-Path $Root 'dist\narrato.exe') (Join-Path $Root '.\cmd\narrato')
+Write-Host "[1/3] Building native Fyne GUI -> dist\玄宇视频工具箱.exe" -ForegroundColor Cyan
+go build -tags fyne_gui -ldflags "-H windowsgui -s -w" -o (Join-Path $Root 'dist\玄宇视频工具箱.exe') (Join-Path $Root '.\cmd\narrato')
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[FAIL] GUI build failed, exit=$LASTEXITCODE" -ForegroundColor Red
     exit $LASTEXITCODE
@@ -63,7 +63,7 @@ Write-Host "   OK" -ForegroundColor Green
 Write-Host ""
 Write-Host "============================================================"
 Write-Host "  Build complete:" -ForegroundColor Green
-Write-Host "    dist\narrato.exe     (native Fyne window + AB Splice Tab)"
+Write-Host "    dist\玄宇视频工具箱.exe (native Fyne window)"
 Write-Host "    dist\narrato-cli.exe (console)"
 Write-Host "    dist\narrato-web.exe (browser UI fallback)"
 Write-Host "============================================================"
