@@ -141,3 +141,83 @@ func TestMiniMaxDefaultsAndRoundTrip(t *testing.T) {
 		t.Fatalf("got %#v", got.MiniMax)
 	}
 }
+
+func TestRenderSettingsDefaultsAndRoundTrip(t *testing.T) {
+	cfg := config.Default()
+	if cfg.TTS.Engine != "edge" || cfg.TTS.Speed != 1 || cfg.TTS.Volume != 1 {
+		t.Fatalf("tts defaults: %#v", cfg.TTS)
+	}
+	if !cfg.UI.SubtitleBurnEnabled || cfg.UI.AspectRatio != "vertical" || cfg.UI.Resolution != "1080p" {
+		t.Fatalf("ui defaults: %#v", cfg.UI)
+	}
+	if cfg.UI.VoiceVolume != 1 || cfg.UI.OriginalVolume != 1.2 || cfg.UI.BGMVolume != 0.3 {
+		t.Fatalf("volume defaults: %#v", cfg.UI)
+	}
+	if cfg.Sonilo.APIKey != "" {
+		t.Fatal("sonilo key must not have a default")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg.TTS.Engine = "minimax"
+	cfg.TTS.Voice = "XuanyuTestVoice"
+	cfg.TTS.Speed = 1.2
+	cfg.TTS.Volume = 0.8
+	cfg.TTS.Pitch = -2
+	cfg.UI.SubtitleBurnEnabled = false
+	cfg.UI.SubtitleFont = "Microsoft YaHei"
+	cfg.UI.SubtitleFontSize = 22
+	cfg.UI.SubtitleColor = "#FFFF00"
+	cfg.UI.SubtitlePosition = "top"
+	cfg.UI.SubtitleMaskEnabled = true
+	cfg.UI.SubtitleMaskY = 80
+	cfg.UI.SubtitleMaskHeight = 16
+	cfg.UI.AspectRatio = "horizontal"
+	cfg.UI.Resolution = "720p"
+	cfg.UI.VoiceVolume = 0.9
+	cfg.UI.OriginalVolume = 1.1
+	cfg.UI.BGMSource = "library"
+	cfg.UI.BGMPath = "/tmp/theme.mp3"
+	cfg.UI.BGMVolume = 0.25
+	cfg.Sonilo.BaseURL = "https://api.sonilo.com"
+	cfg.Sonilo.APIKey = "sn-test"
+	cfg.Sonilo.BGMPrompt = "cinematic"
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TTS.Engine != "minimax" || got.TTS.Voice != "XuanyuTestVoice" || got.TTS.Speed != 1.2 || got.TTS.Pitch != -2 {
+		t.Fatalf("tts: %#v", got.TTS)
+	}
+	if got.UI.SubtitleBurnEnabled || got.UI.AspectRatio != "horizontal" || got.UI.Resolution != "720p" {
+		t.Fatalf("ui: %#v", got.UI)
+	}
+	if got.UI.BGMSource != "library" || got.UI.BGMPath != "/tmp/theme.mp3" {
+		t.Fatalf("bgm: %#v", got.UI)
+	}
+	if got.Sonilo.APIKey != "sn-test" || got.Sonilo.BGMPrompt != "cinematic" {
+		t.Fatalf("sonilo: %#v", got.Sonilo)
+	}
+}
+
+func TestLoadLegacyConfigKeepsBurnAndVolumes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	legacy := []byte("tts:\n  voice: zh-CN-YunjianNeural\nui:\n  target_duration_sec: 180\n  subtitle_hide_on_original: true\n")
+	if err := os.WriteFile(path, legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.UI.SubtitleBurnEnabled {
+		t.Fatal("missing burn flag should stay default true")
+	}
+	if got.UI.VoiceVolume != 1 || got.UI.OriginalVolume != 1.2 {
+		t.Fatalf("legacy volumes: voice=%v orig=%v", got.UI.VoiceVolume, got.UI.OriginalVolume)
+	}
+	if got.TTS.Engine != "edge" || got.TTS.Voice != "zh-CN-YunjianNeural" {
+		t.Fatalf("legacy tts: %#v", got.TTS)
+	}
+}

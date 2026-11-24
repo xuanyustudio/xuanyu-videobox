@@ -11,6 +11,8 @@ import (
 
 	"github.com/narratoai/narrato-go/internal/media"
 	"github.com/narratoai/narrato-go/internal/script"
+	"github.com/narratoai/narrato-go/internal/sonilo"
+	"github.com/narratoai/narrato-go/internal/subtitleburn"
 	"github.com/narratoai/narrato-go/internal/tts"
 )
 
@@ -23,8 +25,30 @@ type Params struct {
 	TTS            tts.Synthesizer
 	Voice          string
 	Bins           media.FFmpegBins // empty paths → Resolve inside Run
-	HideOnOriginal *bool // nil → true (hide OST=1 narration in SRT)
+	HideOnOriginal *bool            // nil → true (hide OST=1 narration in SRT)
 	OnProgress     func(step string, percent int, msg string)
+
+	OriginalVolume float64
+	VoiceVolume    float64
+	BGMPath        string
+	BGMVolume      float64
+	SFXPath        string
+	SFXVolume      float64
+
+	BurnSubtitles    *bool // nil → true
+	SubtitleStyle    subtitleburn.Style
+	SubtitlePosition string
+
+	Mask       media.SubtitleMask
+	Aspect     string // source | vertical | horizontal; empty = keep source size
+	Resolution string // 480p–2160p; ignored when Aspect is empty and Resolution is empty
+
+	// Optional Sonilo client. Failures are logged and skipped; they never abort the render.
+	Sonilo          *sonilo.Client
+	SoniloBGM       bool
+	SoniloBGMPrompt string
+	SoniloSFX       bool
+	SoniloSFXPrompt string
 }
 
 // Run executes clip → concat → mix TTS → burn subtitles.
@@ -64,6 +88,10 @@ func Run(ctx context.Context, p Params) (outputMP4 string, err error) {
 	}
 	if err := os.MkdirAll(filepath.Join(p.WorkDir, "clips"), 0o755); err != nil {
 		return "", fmt.Errorf("mkdir clips: %w", err)
+	}
+	if p.OriginalVolume == 0 && p.VoiceVolume == 0 {
+		p.OriginalVolume = 1.2
+		p.VoiceVolume = 1
 	}
 
 	workItems := append([]script.Item(nil), p.Items...)
@@ -105,7 +133,18 @@ func Run(ctx context.Context, p Params) (outputMP4 string, err error) {
 		ttsPathByID[id] = paddedPath
 	}
 
+	layout, layoutNote, err := resolveLayout(ctx, bins, p)
+	if err != nil {
+		return "", err
+	}
+	if layoutNote != "" {
+		report("layout", 20, layoutNote)
+	}
+
 	report("clip", 25, "cutting segments")
+	if err := validateClipRanges(ctx, bins, workItems, p.VideoPaths, ttsDurByID); err != nil {
+		return "", err
+	}
 	clipPaths := make([]string, 0, len(workItems))
 	var timeline float64
 	for i := range workItems {
@@ -128,7 +167,18 @@ func Run(ctx context.Context, p Params) (outputMP4 string, err error) {
 
 		clipPath := filepath.Join(p.WorkDir, "clips", fmt.Sprintf("%d.mp4", i))
 		if err := media.ClipSegment(ctx, bins, videoPath, ts, item.OST, ttsDur, isHook, clipPath); err != nil {
-			return "", fmt.Errorf("clip item %d: %w", i, err)
+			return "", fmt.Errorf("裁剪第 %d 条脚本失败: %w", i+1, err)
+		}
+		if media.LayoutFilter(layout, media.VideoSize{}) != "" || layout.Mask.Enabled || (layout.Width >= 2 && layout.Height >= 2) {
+			srcSize, serr := media.ProbeVideoSize(ctx, bins, clipPath)
+			if serr != nil {
+				srcSize, _ = media.ProbeVideoSize(ctx, bins, videoPath)
+			}
+			fitted := filepath.Join(p.WorkDir, "clips", fmt.Sprintf("%d_fit.mp4", i))
+			if ferr := media.ApplyVideoLayout(ctx, bins, clipPath, fitted, layout, srcSize); ferr != nil {
+				return "", fmt.Errorf("layout clip %d: %w", i, ferr)
+			}
+			clipPath = fitted
 		}
 		clipPaths = append(clipPaths, clipPath)
 
@@ -145,11 +195,8 @@ func Run(ctx context.Context, p Params) (outputMP4 string, err error) {
 	}
 
 	hideOriginal := hideOnOriginal(p.HideOnOriginal)
-	if hideOriginal {
-		ranges := ost1EditedRanges(workItems)
-		if expr := media.MaskEnableExpr(ranges); expr != "" {
-			report("mask", 40, fmt.Sprintf("mask disable expr (phase 1 log only): %s", expr))
-		}
+	if p.Mask.Enabled {
+		report("mask", 40, "已对画面应用原字幕遮罩")
 	}
 
 	report("subtitle", 45, "building SRT")
@@ -172,26 +219,92 @@ func Run(ctx context.Context, p Params) (outputMP4 string, err error) {
 		return "", fmt.Errorf("concat: %w", err)
 	}
 
-	mixedPath := filepath.Join(p.WorkDir, "mixed.mp4")
+	narratedPath := filepath.Join(p.WorkDir, "narrated.mp4")
 	report("mix", 70, "mixing TTS")
 	timed := buildTimedTTS(workItems, ttsPathByID)
 	if len(timed) == 0 {
-		if err := copyFile(concatPath, mixedPath); err != nil {
-			return "", fmt.Errorf("copy concat to mixed: %w", err)
+		if err := copyFile(concatPath, narratedPath); err != nil {
+			return "", fmt.Errorf("copy concat to narrated: %w", err)
 		}
 	} else {
-		if err := media.MixTTSOntoVideo(ctx, bins, concatPath, timed, mixedPath); err != nil {
+		if err := media.MixAudioOntoVideo(ctx, bins, concatPath, timed, media.MixOptions{
+			OriginalVolume: volumeOr(p.OriginalVolume, 1.2),
+			VoiceVolume:    volumeOr(p.VoiceVolume, 1.0),
+		}, narratedPath); err != nil {
 			return "", fmt.Errorf("mix tts: %w", err)
 		}
 	}
 
+	bgmPath := strings.TrimSpace(p.BGMPath)
+	sfxPath := strings.TrimSpace(p.SFXPath)
+	if p.SoniloBGM || p.SoniloSFX {
+		if p.Sonilo == nil || strings.TrimSpace(p.Sonilo.APIKey) == "" {
+			report("sonilo", 75, "未配置 Sonilo API Key，已跳过 AI 配乐/音效")
+		} else {
+			dur, _ := probeDurationSec(ctx, bins, narratedPath)
+			if p.SoniloBGM && bgmPath == "" {
+				if dur > sonilo.MaxBGMVideoDurationSec {
+					report("bgm", 76, fmt.Sprintf("成片约 %.0f 秒，超过 Sonilo 配乐上限 %d 秒，已跳过", dur, sonilo.MaxBGMVideoDurationSec))
+				} else {
+					report("bgm", 76, "正在用 Sonilo 生成配乐")
+					dest := filepath.Join(p.WorkDir, "sonilo_bgm.m4a")
+					if err := p.Sonilo.GenerateBGM(ctx, narratedPath, p.SoniloBGMPrompt, dest); err != nil {
+						report("bgm", 76, "Sonilo 配乐失败，已跳过: "+err.Error())
+					} else {
+						bgmPath = dest
+					}
+				}
+			}
+			if p.SoniloSFX && sfxPath == "" {
+				if dur > sonilo.MaxSFXVideoDurationSec {
+					report("sfx", 78, fmt.Sprintf("成片约 %.0f 秒，超过 Sonilo 音效上限 %d 秒，已跳过", dur, sonilo.MaxSFXVideoDurationSec))
+				} else {
+					report("sfx", 78, "正在用 Sonilo 生成音效")
+					dest := filepath.Join(p.WorkDir, "sonilo_sfx.m4a")
+					if err := p.Sonilo.GenerateSFX(ctx, narratedPath, p.SoniloSFXPrompt, dest); err != nil {
+						report("sfx", 78, "Sonilo 音效失败，已跳过: "+err.Error())
+					} else {
+						sfxPath = dest
+					}
+				}
+			}
+		}
+	}
+
+	mixedPath := filepath.Join(p.WorkDir, "mixed.mp4")
+	if bgmPath == "" && sfxPath == "" {
+		if err := copyFile(narratedPath, mixedPath); err != nil {
+			return "", fmt.Errorf("copy narrated to mixed: %w", err)
+		}
+	} else {
+		report("mix", 80, "混入背景音乐/音效")
+		if err := media.MixAudioOntoVideo(ctx, bins, narratedPath, nil, media.MixOptions{
+			OriginalVolume: 1,
+			BGMPath:        bgmPath,
+			BGMVolume:      volumeOr(p.BGMVolume, 0.3),
+			SFXPath:        sfxPath,
+			SFXVolume:      volumeOr(p.SFXVolume, 0.6),
+		}, mixedPath); err != nil {
+			return "", fmt.Errorf("mix bgm/sfx: %w", err)
+		}
+	}
+
+	burn := true
+	if p.BurnSubtitles != nil {
+		burn = *p.BurnSubtitles
+	}
 	report("burn", 85, "burning subtitles")
-	if srtBody == "" {
+	if srtBody == "" || !burn {
+		if !burn && srtBody != "" {
+			report("burn", 90, "已关闭烧录，字幕文件: "+srtPath)
+		}
 		if err := copyFile(mixedPath, outPath); err != nil {
 			return "", fmt.Errorf("copy output: %w", err)
 		}
 	} else {
-		if err := media.BurnSubtitles(ctx, bins, mixedPath, srtPath, outPath); err != nil {
+		style := subtitleburn.ApplyPosition(p.SubtitleStyle, p.SubtitlePosition)
+		force := subtitleburn.ForceStyle(style)
+		if err := media.BurnSubtitlesWithForceStyle(ctx, bins, mixedPath, srtPath, outPath, force); err != nil {
 			return "", fmt.Errorf("burn subtitles: %w", err)
 		}
 	}
@@ -205,6 +318,48 @@ func hideOnOriginal(v *bool) bool {
 		return true
 	}
 	return *v
+}
+
+
+func validateClipRanges(ctx context.Context, bins media.FFmpegBins, items []script.Item, videoPaths []string, ttsDurByID map[int]float64) error {
+	durCache := make(map[string]float64)
+	var lines []string
+	for i := range items {
+		item := items[i]
+		videoPath, err := resolveVideoPath(item.VideoID, videoPaths)
+		if err != nil {
+			return fmt.Errorf("第 %d 条脚本的视频: %w", i+1, err)
+		}
+		ts := strings.TrimSpace(item.Timestamp)
+		if ts == "" {
+			return fmt.Errorf("第 %d 条脚本缺少时间范围", i+1)
+		}
+		id := item.ID
+		if id == 0 {
+			id = i + 1
+		}
+		startMs, endMs, err := media.PlanClipRange(ts, item.OST, ttsDurByID[id], item.HookSourceID != nil)
+		if err != nil {
+			return fmt.Errorf("第 %d 条脚本时间范围无效: %w", i+1, err)
+		}
+		srcDur, ok := durCache[videoPath]
+		if !ok {
+			d, perr := media.ProbeDurationSec(ctx, bins, videoPath)
+			if perr != nil || d <= 0 {
+				continue
+			}
+			srcDur = d
+			durCache[videoPath] = srcDur
+		}
+		sourceMs := int(srcDur*1000 + 0.5)
+		if _, _, ferr := media.FitClipRangeToSource(startMs, endMs, sourceMs); ferr != nil {
+			lines = append(lines, fmt.Sprintf("第 %d 条  %s  片源「%s」只有 %s", i+1, ts, filepath.Base(videoPath), media.FormatScriptClock(sourceMs)))
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return fmt.Errorf("有 %d 条脚本的时间范围超出片源时长，无法裁剪：\n%s\n请缩短这些段落的时间轴，或在脚本里把它们指定到其他视频。", len(lines), strings.Join(lines, "\n"))
 }
 
 func resolveBins(bins media.FFmpegBins) (media.FFmpegBins, error) {
@@ -324,7 +479,7 @@ func clockToSec(clock string) (float64, bool) {
 	if err1 != nil || err2 != nil || err3 != nil {
 		return 0, false
 	}
-	return float64(h*3600+m*60+s), true
+	return float64(h*3600 + m*60 + s), true
 }
 
 func ost1EditedRanges(items []script.Item) [][2]float64 {
@@ -393,4 +548,48 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, data, 0o644)
+}
+
+func volumeOr(v, fallback float64) float64 {
+	if v != v || v == 0 {
+		return fallback
+	}
+	if v < 0 {
+		return 0
+	}
+	if v > 2 {
+		return 2
+	}
+	return v
+}
+
+func resolveLayout(ctx context.Context, bins media.FFmpegBins, p Params) (media.VideoLayout, string, error) {
+	layout := media.VideoLayout{Mask: p.Mask}
+	aspect := strings.TrimSpace(p.Aspect)
+	res := strings.TrimSpace(p.Resolution)
+	if aspect == "" && res == "" && !p.Mask.Enabled {
+		return layout, "", nil
+	}
+	var src media.VideoSize
+	if len(p.VideoPaths) > 0 {
+		if sz, err := media.ProbeVideoSize(ctx, bins, p.VideoPaths[0]); err == nil {
+			src = sz
+		}
+	}
+	if aspect != "" || res != "" {
+		if src.Width == 0 || src.Height == 0 {
+			// Fall back to a vertical 1080p canvas if we cannot probe the source.
+			src = media.VideoSize{Width: 1080, Height: 1920}
+		}
+		if aspect == "" {
+			aspect = media.AspectSource
+		}
+		if res == "" {
+			res = "1080p"
+		}
+		w, h := media.TargetSize(src.Width, src.Height, aspect, res)
+		layout.Width, layout.Height = w, h
+		return layout, fmt.Sprintf("画面 %s %s（%dx%d）", media.NormalizeAspect(aspect), res, w, h), nil
+	}
+	return layout, "", nil
 }

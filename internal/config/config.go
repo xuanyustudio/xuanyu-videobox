@@ -21,6 +21,7 @@ type Config struct {
 	Video     Video     `yaml:"video" json:"video"`
 	Image     ImageGen  `yaml:"image" json:"image"`
 	MiniMax   MiniMax   `yaml:"minimax" json:"minimax"`
+	Sonilo    Sonilo    `yaml:"sonilo" json:"sonilo"`
 }
 
 type LLM struct {
@@ -30,7 +31,16 @@ type LLM struct {
 }
 
 type TTS struct {
-	Voice string `yaml:"voice"`
+	Voice              string  `yaml:"voice" json:"voice"`
+	Engine              string  `yaml:"engine" json:"engine"` // edge | minimax | kokoro | openvoice | indextts2
+	Speed               float64 `yaml:"speed" json:"speed"`   // 0.5–2.0, default 1
+	Volume              float64 `yaml:"volume" json:"volume"` // synthesis loudness 0.1–2.0, default 1
+	Pitch               float64 `yaml:"pitch" json:"pitch"`   // -12–12, default 0
+	KokoroURL           string  `yaml:"kokoro_url" json:"kokoro_url"`
+	OpenVoiceURL        string  `yaml:"openvoice_url" json:"openvoice_url"`
+	OpenVoiceReference  string  `yaml:"openvoice_reference" json:"openvoice_reference"`
+	IndexTTS2URL        string  `yaml:"indextts2_url" json:"indextts2_url"`
+	IndexTTS2Reference  string  `yaml:"indextts2_reference" json:"indextts2_reference"`
 }
 
 type FFmpeg struct {
@@ -49,9 +59,31 @@ type ASR struct {
 }
 
 type UI struct {
-	TargetDurationSec      int  `yaml:"target_duration_sec"`
-	SubtitleHideOnOriginal bool `yaml:"subtitle_hide_on_original"`
-	SubtitleMaskEnabled    bool `yaml:"subtitle_mask_enabled"`
+	TargetDurationSec      int     `yaml:"target_duration_sec" json:"target_duration_sec"`
+	SubtitleHideOnOriginal bool    `yaml:"subtitle_hide_on_original" json:"subtitle_hide_on_original"`
+	SubtitleMaskEnabled    bool    `yaml:"subtitle_mask_enabled" json:"subtitle_mask_enabled"`
+	SubtitleBurnEnabled    bool    `yaml:"subtitle_burn_enabled" json:"subtitle_burn_enabled"`
+	SubtitleFont           string  `yaml:"subtitle_font" json:"subtitle_font"`
+	SubtitleFontSize       int     `yaml:"subtitle_font_size" json:"subtitle_font_size"`
+	SubtitleColor          string  `yaml:"subtitle_color" json:"subtitle_color"`
+	SubtitlePosition       string  `yaml:"subtitle_position" json:"subtitle_position"` // bottom | top | center
+	SubtitleMaskX          float64 `yaml:"subtitle_mask_x" json:"subtitle_mask_x"`
+	SubtitleMaskY          float64 `yaml:"subtitle_mask_y" json:"subtitle_mask_y"`
+	SubtitleMaskWidth      float64 `yaml:"subtitle_mask_width" json:"subtitle_mask_width"`
+	SubtitleMaskHeight     float64 `yaml:"subtitle_mask_height" json:"subtitle_mask_height"`
+	SubtitleMaskBlur       int     `yaml:"subtitle_mask_blur" json:"subtitle_mask_blur"`
+	SubtitleMaskOpacity    int     `yaml:"subtitle_mask_opacity" json:"subtitle_mask_opacity"`
+	AspectRatio            string  `yaml:"aspect_ratio" json:"aspect_ratio"` // source | vertical | horizontal
+	Resolution             string  `yaml:"resolution" json:"resolution"`     // 480p–2160p
+	VoiceVolume            float64 `yaml:"voice_volume" json:"voice_volume"`
+	OriginalVolume         float64 `yaml:"original_volume" json:"original_volume"`
+	BGMSource              string  `yaml:"bgm_source" json:"bgm_source"` // off | library | upload | sonilo
+	BGMPath                string  `yaml:"bgm_path" json:"bgm_path"`
+	BGMVolume              float64 `yaml:"bgm_volume" json:"bgm_volume"`
+	BGMLibraryDir          string  `yaml:"bgm_library_dir" json:"bgm_library_dir"`
+	SFXEnabled             bool    `yaml:"sfx_enabled" json:"sfx_enabled"`
+	SFXPrompt              string  `yaml:"sfx_prompt" json:"sfx_prompt"`
+	SFXVolume              float64 `yaml:"sfx_volume" json:"sfx_volume"`
 }
 
 // Replicate holds 提示词提取 / 视频逆向 settings: an OpenAI-compatible vision model
@@ -91,6 +123,13 @@ type MiniMax struct {
 	Model   string `yaml:"model" json:"model"`
 }
 
+// Sonilo holds the optional AI BGM / SFX key. Empty key leaves the feature off.
+type Sonilo struct {
+	BaseURL   string `yaml:"base_url" json:"base_url"`
+	APIKey    string `yaml:"api_key" json:"api_key"`
+	BGMPrompt string `yaml:"bgm_prompt" json:"bgm_prompt"`
+}
+
 type Paths struct {
 	ProjectsRoot string `yaml:"projects_root"`
 }
@@ -103,7 +142,13 @@ func Default() *Config {
 			Model:   "gpt-4o-mini",
 		},
 		TTS: TTS{
-			Voice: "zh-CN-XiaoxiaoNeural",
+			Voice:        "zh-CN-XiaoxiaoNeural",
+			Engine:       "edge",
+			Speed:        1,
+			Volume:       1,
+			KokoroURL:     "http://127.0.0.1:3211",
+			OpenVoiceURL:  "http://127.0.0.1:3212",
+			IndexTTS2URL:  "http://127.0.0.1:3213",
 		},
 		ASR: ASR{
 			Backend:       "bailian",
@@ -113,6 +158,18 @@ func Default() *Config {
 		UI: UI{
 			TargetDurationSec:      180,
 			SubtitleHideOnOriginal: true,
+			SubtitleBurnEnabled:    true,
+			SubtitleFont:           "Microsoft YaHei",
+			SubtitleFontSize:       15,
+			SubtitleColor:          "#FFFFFF",
+			SubtitlePosition:       "bottom",
+			AspectRatio:            "vertical",
+			Resolution:             "1080p",
+			VoiceVolume:            1.0,
+			OriginalVolume:         1.2,
+			BGMSource:              "off",
+			BGMVolume:              0.3,
+			SFXVolume:              0.6,
 		},
 		Paths: Paths{
 			ProjectsRoot: defaultProjectsRoot(),

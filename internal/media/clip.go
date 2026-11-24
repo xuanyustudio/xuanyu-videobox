@@ -16,6 +16,11 @@ type FFmpegBins struct {
 	FFprobe string
 }
 
+// Minimum leftover media required after the clip start; shorter than this
+// is treated as past the end of the source (ffmpeg can still write a
+// header-only mp4 with no video).
+const minRemainingClipMs = 50
+
 // ClipSegment cuts one segment from videoPath according to script OST rules.
 //
 // Audio strategy (phase 1):
@@ -27,28 +32,15 @@ func ClipSegment(ctx context.Context, bins FFmpegBins, videoPath, timestamp stri
 		return fmt.Errorf("ffmpeg binary required")
 	}
 
-	startMs, endMs, err := script.ParseTimestampRange(timestamp)
+	startMs, endMs, err := PlanClipRange(timestamp, ost, ttsDur, isHook)
 	if err != nil {
-		return fmt.Errorf("parse timestamp: %w", err)
+		return err
 	}
-
-	removeAudio := false
-	switch ost {
-	case 0:
-		removeAudio = true
-		dur := ResolveClipDuration(ttsDur, isHook)
-		endMs = startMs + durationToMs(dur)
-	case 1:
-		minSec := script.GeneralClipMin
-		if isHook {
-			minSec = script.OpeningHookMin
+	if srcDur, perr := ProbeDurationSec(ctx, bins, videoPath); perr == nil && srcDur > 0 {
+		startMs, endMs, err = FitClipRangeToSource(startMs, endMs, durationToMs(srcDur))
+		if err != nil {
+			return err
 		}
-		endMs = extendEndMs(startMs, endMs, minSec)
-	case 2:
-		dur := ResolveClipDuration(ttsDur, isHook)
-		endMs = startMs + durationToMs(dur)
-	default:
-		return fmt.Errorf("unsupported OST %d", ost)
 	}
 
 	startFF := msToFFmpegTime(startMs)
@@ -58,17 +50,84 @@ func ClipSegment(ctx context.Context, bins FFmpegBins, videoPath, timestamp stri
 		return err
 	}
 
-	args := []string{"-y", "-ss", startFF, "-i", videoPath, "-t", duration}
+	args := []string{"-y", "-ss", startFF, "-i", videoPath, "-t", duration, "-map", "0:v:0"}
 	args = append(args, defaultVideoEncodeArgs()...)
-	if removeAudio {
+	if ost == 0 {
 		args = append(args, "-an")
 	} else {
+		args = append(args, "-map", "0:a?")
 		args = append(args, defaultAudioEncodeArgs()...)
 	}
-	args = append(args, "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", outPath)
+	args = append(args, "-dn", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", outPath)
 
-	_, err = Run(ctx, bins.FFmpeg, args...)
-	return err
+	if _, err = Run(ctx, bins.FFmpeg, args...); err != nil {
+		return err
+	}
+	if ok, herr := HasVideoStream(ctx, bins, outPath); herr != nil || !ok {
+		return fmt.Errorf("裁剪结果没有画面（时间 %s–%s），请检查该段时间是否超出片源时长", FormatScriptClock(startMs), FormatScriptClock(endMs))
+	}
+	return nil
+}
+
+// PlanClipRange returns the start/end (milliseconds) ClipSegment would request
+// before clamping to the source duration.
+func PlanClipRange(timestamp string, ost int, ttsDur float64, isHook bool) (startMs, endMs int, err error) {
+	startMs, endMs, err = script.ParseTimestampRange(timestamp)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse timestamp: %w", err)
+	}
+
+	switch ost {
+	case 0:
+		endMs = startMs + durationToMs(ResolveClipDuration(ttsDur, isHook))
+	case 1:
+		minSec := script.GeneralClipMin
+		if isHook {
+			minSec = script.OpeningHookMin
+		}
+		endMs = extendEndMs(startMs, endMs, minSec)
+	case 2:
+		endMs = startMs + durationToMs(ResolveClipDuration(ttsDur, isHook))
+	default:
+		return 0, 0, fmt.Errorf("unsupported OST %d", ost)
+	}
+	if endMs <= startMs {
+		return startMs, endMs, fmt.Errorf("invalid clip range: %s -> %s", msToFFmpegTime(startMs), msToFFmpegTime(endMs))
+	}
+	return startMs, endMs, nil
+}
+
+// FitClipRangeToSource clamps end to the source duration. If the start is at
+// or past the end of the source (or leftover media is under 50ms), it returns
+// a Chinese error the UI can show directly.
+func FitClipRangeToSource(startMs, endMs, sourceMs int) (int, int, error) {
+	if sourceMs <= 0 {
+		return startMs, endMs, fmt.Errorf("无法读取片源时长")
+	}
+	if startMs >= sourceMs || sourceMs-startMs < minRemainingClipMs {
+		return startMs, endMs, fmt.Errorf("时间范围从 %s 开始，但片源只有 %s，已经超出片尾", FormatScriptClock(startMs), FormatScriptClock(sourceMs))
+	}
+	if endMs > sourceMs {
+		endMs = sourceMs
+	}
+	if endMs-startMs < minRemainingClipMs {
+		return startMs, endMs, fmt.Errorf("时间范围从 %s 开始，但片源只有 %s，已经超出片尾", FormatScriptClock(startMs), FormatScriptClock(sourceMs))
+	}
+	return startMs, endMs, nil
+}
+
+// FormatScriptClock formats milliseconds as 00:02:54,720 (script-style clock).
+func FormatScriptClock(ms int) string {
+	if ms < 0 {
+		ms = 0
+	}
+	h := ms / 3600000
+	ms %= 3600000
+	m := ms / 60000
+	ms %= 60000
+	s := ms / 1000
+	rem := ms % 1000
+	return fmt.Sprintf("%02d:%02d:%02d,%03d", h, m, s, rem)
 }
 
 // PreviewClip extracts the script timestamp range with stream copy for quick playback.
@@ -80,6 +139,12 @@ func PreviewClip(ctx context.Context, bins FFmpegBins, videoPath, timestamp, out
 	if err != nil {
 		return fmt.Errorf("时间范围无效（应为 00:00:00,000-00:00:02,000）: %w", err)
 	}
+	if srcDur, perr := ProbeDurationSec(ctx, bins, videoPath); perr == nil && srcDur > 0 {
+		startMs, endMs, err = FitClipRangeToSource(startMs, endMs, durationToMs(srcDur))
+		if err != nil {
+			return err
+		}
+	}
 	startFF := msToFFmpegTime(startMs)
 	endFF := msToFFmpegTime(endMs)
 	duration, err := ffmpegDurationBetween(startFF, endFF)
@@ -88,6 +153,7 @@ func PreviewClip(ctx context.Context, bins FFmpegBins, videoPath, timestamp, out
 	}
 	args := []string{
 		"-y", "-ss", startFF, "-i", videoPath, "-t", duration,
+		"-map", "0:v:0", "-map", "0:a?", "-dn",
 		"-c", "copy", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart",
 		outPath,
 	}

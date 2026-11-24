@@ -310,13 +310,20 @@ func newVoicePicker(state *AppState, progress *widget.ProgressBar, status *widge
 				APIKey:  strings.TrimSpace(state.Cfg.MiniMax.APIKey),
 				Model:   strings.TrimSpace(state.Cfg.MiniMax.Model),
 			}
-			result, err := client.Synthesize(ctx, v.ID, text)
 			var saved string
-			if err == nil {
-				dir := filepath.Join(os.TempDir(), "xuanyu-voice-preview")
-				if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
-					err = mkErr
-				} else {
+			var err error
+			dir := filepath.Join(os.TempDir(), "xuanyu-voice-preview")
+			if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+				err = mkErr
+			} else if u := v.PreviewURL(); u != "" {
+				saved = filepath.Join(dir, "intro_"+safeVoiceFileName(v.ID)+filepath.Ext(officialPreviewFileName(u, v.ID)))
+				if st, stErr := os.Stat(saved); stErr != nil || st.Size() < 2048 {
+					err = voiceclone.DownloadDemo(ctx, officialPreviewHTTPClient(), u, saved)
+				}
+			} else {
+				var result *voiceclone.SynthesizeResult
+				result, err = client.Synthesize(ctx, v.ID, text)
+				if err == nil {
 					saved = filepath.Join(dir, "intro_"+safeVoiceFileName(v.ID)+"_"+time.Now().Format("150405")+"."+extOrMP3(result.Format))
 					err = os.WriteFile(saved, result.Audio, 0o644)
 				}

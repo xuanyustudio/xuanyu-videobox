@@ -363,6 +363,7 @@ func newSubtitlePage(state *AppState) fyne.CanvasObject {
 			BailianAPIKey: state.Cfg.ASR.APIKey,
 			Hotword:       state.Cfg.ASR.Hotword,
 			EnableSpk:     state.Cfg.ASR.EnableSpk,
+			FFmpeg:        state.Cfg.FFmpeg.Path,
 		}
 		launch := func() {
 			mu.Lock()

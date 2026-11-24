@@ -216,6 +216,7 @@ func TestListVoices(t *testing.T) {
 					"voice_name":   "新闻女声",
 					"description":  []string{"专业播音腔"},
 					"created_time": "1970-01-01",
+					"demo_audio":   "https://example.invalid/news-anchor.mp3",
 				},
 			},
 			"voice_cloning": []any{
@@ -257,6 +258,12 @@ func TestListVoices(t *testing.T) {
 	if voices[2].Kind != VoiceTypeSystem || voices[2].Name != "新闻女声" {
 		t.Fatalf("system %#v", voices[2])
 	}
+	if voices[2].PreviewURL() != "https://example.invalid/news-anchor.mp3" {
+		t.Fatalf("system preview %#v", voices[2])
+	}
+	if voices[0].PreviewURL() != "" {
+		t.Fatalf("cloning should have no preview, got %#v", voices[0])
+	}
 	if !strings.Contains(voices[2].Display(), "新闻女声") || !strings.Contains(voices[0].Display(), "复刻") {
 		t.Fatalf("display %q %q", voices[0].Display(), voices[2].Display())
 	}
@@ -270,5 +277,16 @@ func TestListVoicesRequiresKey(t *testing.T) {
 	c := &Client{}
 	if _, err := c.ListVoices(context.Background(), VoiceTypeAll); err == nil || !strings.Contains(err.Error(), "API Key") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestFindPreviewURL(t *testing.T) {
+	raw := []byte(`{"voice_id":"x","nested":{"preview_url":"https://cdn.example/sample.mp3"},"icon":"https://cdn.example/avatar.png"}`)
+	got := FindPreviewURL(raw)
+	if got != "https://cdn.example/sample.mp3" {
+		t.Fatalf("got %q", got)
+	}
+	if NormalizePreviewURL("not-a-url") != "" {
+		t.Fatal("expected empty for non-url")
 	}
 }

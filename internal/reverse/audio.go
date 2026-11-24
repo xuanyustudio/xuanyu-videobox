@@ -110,6 +110,7 @@ func asrOptions(cfg *config.Config) asr.Options {
 		opt.FireRedAPIURL = cfg.ASR.FireRedAPIURL
 		opt.BailianAPIKey = cfg.ASR.APIKey
 		opt.Hotword = cfg.ASR.Hotword
+		opt.FFmpeg = cfg.FFmpeg.Path
 		if cfg.ASR.EnableSpk {
 			opt.EnableSpk = true
 		}

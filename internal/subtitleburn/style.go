@@ -14,6 +14,7 @@ type Style struct {
 	Outline      int
 	Shadow       int
 	MarginV      int
+	Alignment    int // ASS alignment; 0 means default 2 (bottom center)
 }
 
 // DefaultStyle matches original.DefaultSubtitleStyle, with font size 15.
@@ -55,9 +56,13 @@ func ForceStyle(s Style) string {
 		s.MarginV = d.MarginV
 	}
 	fn := strings.ReplaceAll(s.FontName, "'", `\'`)
-	return fmt.Sprintf("FontSize=%d,FontName=%s,PrimaryColour=%s,OutlineColour=%s,Outline=%d,Shadow=%d,MarginV=%d",
+	align := s.Alignment
+	if align <= 0 {
+		align = 2
+	}
+	return fmt.Sprintf("FontSize=%d,FontName=%s,PrimaryColour=%s,OutlineColour=%s,Outline=%d,Shadow=%d,MarginV=%d,Alignment=%d",
 		clamp(s.FontSize, 10, 72), fn, hexToAssBGR(s.PrimaryColor), hexToAssBGR(s.OutlineColor),
-		clamp(s.Outline, 0, 8), clamp(s.Shadow, 0, 8), clamp(s.MarginV, 0, 200))
+		clamp(s.Outline, 0, 8), clamp(s.Shadow, 0, 8), clamp(s.MarginV, 0, 200), clamp(align, 1, 9))
 }
 
 func hexToAssBGR(hex string) string {
@@ -77,4 +82,26 @@ func clamp(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+// ApplyPosition sets ASS alignment and a default margin for top/center/bottom.
+func ApplyPosition(style Style, position string) Style {
+	switch strings.ToLower(strings.TrimSpace(position)) {
+	case "top":
+		style.Alignment = 8
+		if style.MarginV < 0 {
+			style.MarginV = 36
+		}
+	case "center", "middle":
+		style.Alignment = 5
+		if style.MarginV < 0 {
+			style.MarginV = 0
+		}
+	default:
+		style.Alignment = 2
+		if style.MarginV < 0 {
+			style.MarginV = 36
+		}
+	}
+	return style
 }

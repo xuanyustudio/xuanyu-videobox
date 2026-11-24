@@ -309,6 +309,7 @@ func newAssetsPage(state *AppState) (fyne.CanvasObject, func()) {
 			BailianAPIKey: state.Cfg.ASR.APIKey,
 			Hotword:       state.Cfg.ASR.Hotword,
 			EnableSpk:     state.Cfg.ASR.EnableSpk,
+			FFmpeg:        state.Cfg.FFmpeg.Path,
 		}
 		if err := asr.RequireReady(opt); err != nil {
 			status.SetText(err.Error())

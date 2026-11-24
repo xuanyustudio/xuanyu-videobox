@@ -2,7 +2,9 @@ package webui
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,16 +14,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/narratoai/narrato-go/internal/config"
 	"github.com/narratoai/narrato-go/internal/linkdl"
+	"github.com/narratoai/narrato-go/internal/media"
 	"github.com/narratoai/narrato-go/internal/pipeline"
 	"github.com/narratoai/narrato-go/internal/project"
 	"github.com/narratoai/narrato-go/internal/replicate"
 	"github.com/narratoai/narrato-go/internal/script"
 	"github.com/narratoai/narrato-go/internal/tts"
+	"github.com/narratoai/narrato-go/internal/voiceclone"
 )
 
 //go:embed index.html
@@ -42,6 +48,10 @@ type server struct {
 	replicateLast *replicate.Result
 
 	linkDLBusy bool
+
+	cancel context.CancelFunc
+
+	mmVoices []voiceclone.VoiceInfo
 }
 
 // DefaultConfigPath prefers config.yaml beside the executable.
@@ -88,6 +98,11 @@ func Run() {
 	mux.HandleFunc("/api/script/generate", s.handleScriptGenerate)
 	mux.HandleFunc("/api/script/set", s.handleScriptSet)
 	mux.HandleFunc("/api/render", s.handleRender)
+	mux.HandleFunc("/api/render/cancel", s.handleRenderCancel)
+	mux.HandleFunc("/api/render/open", s.handleRenderOpen)
+	mux.HandleFunc("/api/tts/preview", s.handleTTSPreview)
+	mux.HandleFunc("/api/tts/preview/stop", s.handleTTSPreviewStop)
+	mux.HandleFunc("/api/tts/voices", s.handleTTSVoices)
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/replicate/run", s.handleReplicateRun)
 	mux.HandleFunc("/api/replicate/frame", s.handleReplicateFrame)
@@ -139,17 +154,17 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	type resp struct {
-		Cfg            *config.Config  `json:"cfg"`
-		CfgPath        string          `json:"cfg_path"`
-		ProjectsRoot   string          `json:"projects_root"`
+		Cfg            *config.Config   `json:"cfg"`
+		CfgPath        string           `json:"cfg_path"`
+		ProjectsRoot   string           `json:"projects_root"`
 		Project        *project.Project `json:"project"`
-		EstimatedSec   float64         `json:"estimated_sec"`
-		EstimatedClock string          `json:"estimated_clock"`
-		TargetSec      int             `json:"target_sec"`
-		OverTarget     bool            `json:"over_target"`
-		Busy           bool            `json:"busy"`
-		Progress       int             `json:"progress"`
-		LastOutput     string          `json:"last_output"`
+		EstimatedSec   float64          `json:"estimated_sec"`
+		EstimatedClock string           `json:"estimated_clock"`
+		TargetSec      int              `json:"target_sec"`
+		OverTarget     bool             `json:"over_target"`
+		Busy           bool             `json:"busy"`
+		Progress       int              `json:"progress"`
+		LastOutput     string           `json:"last_output"`
 	}
 	out := resp{
 		Cfg:          s.cfg,
@@ -186,13 +201,17 @@ func (s *server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	s.cfg = &body
-	if body.Paths.ProjectsRoot != "" {
-		s.projectsRoot = body.Paths.ProjectsRoot
+	if s.cfg == nil {
+		s.cfg = config.Default()
+	}
+	mergeWebSettings(s.cfg, &body)
+	if s.cfg.Paths.ProjectsRoot != "" {
+		s.projectsRoot = s.cfg.Paths.ProjectsRoot
 	}
 	path := s.cfgPath
+	cfg := s.cfg
 	s.mu.Unlock()
-	if err := config.Save(path, &body); err != nil {
+	if err := config.Save(path, cfg); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
@@ -396,6 +415,13 @@ func (s *server) handleRender(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "需要工程、视频和脚本", 400)
 		return
 	}
+	if r.Body != nil && r.ContentLength != 0 {
+		var body config.Config
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			mergeWebSettings(s.cfg, &body)
+			_ = config.Save(s.cfgPath, s.cfg)
+		}
+	}
 	s.busy = true
 	s.progress = 0
 	s.logs = nil
@@ -405,29 +431,42 @@ func (s *server) handleRender(w http.ResponseWriter, r *http.Request) {
 	slug := s.proj.Slug
 	root := s.projectsRoot
 	cfg := *s.cfg
-	hide := cfg.UI.SubtitleHideOnOriginal
+	s.mu.Unlock()
+
+	synth, err := pipeline.NewSynthesizerFromConfig(&cfg)
+	if err != nil {
+		s.mu.Lock()
+		s.busy = false
+		s.mu.Unlock()
+		http.Error(w, err.Error(), 400)
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	s.cancel = cancel
 	s.mu.Unlock()
 
 	go func() {
 		defer func() {
 			s.mu.Lock()
 			s.busy = false
+			s.cancel = nil
 			s.mu.Unlock()
 		}()
 		taskID := time.Now().Format("20060102-150405")
 		workDir := filepath.Join(root, slug, "tasks", taskID)
 		outPath := filepath.Join(workDir, "final.mp4")
 		s.appendLog("任务 " + taskID)
+		s.appendLog("引擎 " + tts.NormalizeEngine(cfg.TTS.Engine) + " 音色 " + cfg.TTS.Voice)
 
-		synth := tts.Synthesizer(tts.Edge{})
 		params := pipeline.Params{
-			Items:             items,
-			VideoPaths:        videos,
-			WorkDir:           workDir,
-			OutputPath:        outPath,
-			TTS:               synth,
-			Voice:             cfg.TTS.Voice,
-			HideOnOriginal:    &hide,
+			Items:      items,
+			VideoPaths: videos,
+			WorkDir:    workDir,
+			OutputPath: outPath,
+			TTS:        synth,
+			Voice:      cfg.TTS.Voice,
 			OnProgress: func(step string, percent int, msg string) {
 				s.mu.Lock()
 				s.progress = percent
@@ -435,13 +474,13 @@ func (s *server) handleRender(w http.ResponseWriter, r *http.Request) {
 				s.appendLog(fmt.Sprintf("[%d%%] %s %s", percent, step, msg))
 			},
 		}
-		out, err := pipeline.Run(context.Background(), params)
+		pipeline.ApplyConfig(&params, &cfg)
+		out, err := pipeline.Run(ctx, params)
 		if err != nil {
-			s.appendLog("Edge TTS/合成失败，改用 Fake 重试: " + err.Error())
-			params.TTS = tts.Fake{}
-			out, err = pipeline.Run(context.Background(), params)
-		}
-		if err != nil {
+			if ctx.Err() != nil {
+				s.appendLog("已取消")
+				return
+			}
 			s.appendLog("合成失败: " + err.Error())
 			return
 		}
@@ -464,9 +503,446 @@ func (s *server) appendLog(line string) {
 	}
 }
 
+func (s *server) handleRenderCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", 405)
+		return
+	}
+	s.mu.Lock()
+	fn := s.cancel
+	s.mu.Unlock()
+	if fn != nil {
+		fn()
+		s.appendLog("已请求取消…")
+	}
+	writeJSON(w, map[string]string{"ok": "1"})
+}
+
+func (s *server) handleRenderOpen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", 405)
+		return
+	}
+	s.mu.Lock()
+	out := s.lastOutput
+	s.mu.Unlock()
+	if out == "" {
+		http.Error(w, "还没有合成完成的成片", 400)
+		return
+	}
+	if err := media.OpenFile(out); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, map[string]string{"ok": "1", "path": out})
+}
+
+func (s *server) handleTTSPreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", 405)
+		return
+	}
+	var body struct {
+		Text string `json:"text"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	s.mu.Lock()
+	cfg := *s.cfg
+	var items []script.Item
+	if s.proj != nil {
+		items = s.proj.ScriptItems
+	}
+	s.mu.Unlock()
+	sample := strings.TrimSpace(body.Text)
+	if sample == "" {
+		sample = tts.PreviewText(items, 80)
+	} else {
+		sample = tts.TruncateRunes(sample, 80)
+	}
+	if path, ok, err := tts.DirectPreviewPath(cfg.TTS.Engine, cfg.TTS.Voice, cfg.TTS.IndexTTS2Reference); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	} else if ok {
+		if err := s.playPreviewAudio(path); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		source := "official"
+		if tts.IndexTTS2IDForLabel(cfg.TTS.Voice) == tts.IndexTTS2CloneID {
+			source = "reference"
+		}
+		writeJSON(w, map[string]string{"ok": "1", "text": sample, "path": path, "source": source})
+		return
+	}
+
+	dir := filepath.Join(os.TempDir(), "xuanyu-voice-preview")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	previewFor := tts.PreviewTimeout
+	if tts.NormalizeEngine(cfg.TTS.Engine) == tts.EngineIndexTTS2 {
+		previewFor = tts.IndexTTS2PreviewTimeout
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), previewFor)
+	defer cancel()
+
+	officialURL := ""
+	if tts.NormalizeEngine(cfg.TTS.Engine) == tts.EngineMiniMax {
+		s.mu.Lock()
+		cached := append([]voiceclone.VoiceInfo(nil), s.mmVoices...)
+		s.mu.Unlock()
+		officialURL = previewURLForVoice(cached, cfg.TTS.Voice)
+		if officialURL == "" {
+			client := &voiceclone.Client{BaseURL: cfg.MiniMax.BaseURL, APIKey: cfg.MiniMax.APIKey, Model: cfg.MiniMax.Model}
+			if voices, err := client.ListVoices(ctx, voiceclone.VoiceTypeAll); err == nil {
+				s.mu.Lock()
+				s.mmVoices = append([]voiceclone.VoiceInfo(nil), voices...)
+				s.mu.Unlock()
+				officialURL = previewURLForVoice(voices, cfg.TTS.Voice)
+			}
+		}
+	}
+	if officialURL != "" {
+		out := filepath.Join(dir, officialPreviewFileName(officialURL, cfg.TTS.Voice))
+		if st, err := os.Stat(out); err != nil || st.Size() < 2048 {
+			httpClient := &http.Client{Timeout: tts.PreviewTimeout}
+			if err := voiceclone.DownloadDemo(ctx, httpClient, officialURL, out); err != nil {
+				http.Error(w, "下载官方预听音频失败: "+err.Error(), 500)
+				return
+			}
+		}
+		if err := s.playPreviewAudio(out); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, map[string]string{"ok": "1", "text": sample, "path": out, "source": "official"})
+		return
+	}
+
+	synth, err := pipeline.NewSynthesizerFromConfig(&cfg)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	ext := ".mp3"
+	switch tts.NormalizeEngine(cfg.TTS.Engine) {
+	case tts.EngineKokoro, tts.EngineOpenVoice, tts.EngineIndexTTS2:
+		ext = ".wav"
+	}
+	out := filepath.Join(dir, fmt.Sprintf("preview_%d%s", time.Now().UnixNano(), ext))
+	if _, err := synth.Synthesize(ctx, sample, cfg.TTS.Voice, out); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	if err := s.playPreviewAudio(out); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, map[string]string{"ok": "1", "text": sample, "path": out, "source": "synthesize"})
+}
+
+func (s *server) handleTTSPreviewStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", 405)
+		return
+	}
+	media.StopAudio()
+	writeJSON(w, map[string]string{"ok": "1"})
+}
+
+func (s *server) playPreviewAudio(path string) error {
+	ffmpeg := ""
+	if s != nil && s.cfg != nil {
+		ffmpeg = s.cfg.FFmpeg.Path
+	}
+	return media.PlayAudioConfigured(path, ffmpeg)
+}
+
+func (s *server) handleTTSVoices(w http.ResponseWriter, r *http.Request) {
+	engine := tts.NormalizeEngine(r.URL.Query().Get("engine"))
+	type localItem struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+	}
+	writeLocal := func(list []tts.VoiceOption) {
+		out := make([]localItem, 0, len(list))
+		for _, v := range list {
+			lab := v.Label
+			if lab == "" {
+				lab = v.ID
+			}
+			out = append(out, localItem{ID: v.ID, Label: lab})
+		}
+		writeJSON(w, out)
+	}
+	if engine == tts.EngineKokoro {
+		s.mu.Lock()
+		cfg := *s.cfg
+		s.mu.Unlock()
+		list, _ := tts.ListKokoroVoices(r.Context(), cfg.TTS.KokoroURL)
+		if len(list) == 0 {
+			list = tts.BuiltinKokoroVoices()
+		}
+		writeLocal(list)
+		return
+	}
+	if engine == tts.EngineOpenVoice {
+		s.mu.Lock()
+		cfg := *s.cfg
+		s.mu.Unlock()
+		list, _ := tts.ListOpenVoiceVoices(r.Context(), cfg.TTS.OpenVoiceURL)
+		if len(list) == 0 {
+			list = tts.BuiltinOpenVoiceVoices()
+		}
+		writeLocal(list)
+		return
+	}
+	if engine == tts.EngineIndexTTS2 {
+		s.mu.Lock()
+		cfg := *s.cfg
+		s.mu.Unlock()
+		list, _ := tts.ListIndexTTS2Voices(r.Context(), cfg.TTS.IndexTTS2URL)
+		list = tts.RankedIndexTTS2Voices(list)
+		type item struct {
+			ID     string `json:"id"`
+			Label  string `json:"label"`
+			Rating int    `json:"rating,omitempty"`
+		}
+		out := make([]item, 0, len(list))
+		for _, v := range list {
+			lab := v.Label
+			if lab == "" {
+				lab = v.ID
+			}
+			out = append(out, item{ID: v.ID, Label: lab, Rating: tts.IndexTTS2Recommendation(v.ID)})
+		}
+		writeJSON(w, out)
+		return
+	}
+	if engine != tts.EngineMiniMax {
+		type item struct {
+			ID     string `json:"id"`
+			Label  string `json:"label"`
+			Rating int    `json:"rating,omitempty"`
+		}
+		out := make([]item, 0)
+		for _, v := range tts.RankedEdgeVoices() {
+			out = append(out, item{ID: v.ID, Label: v.Label, Rating: tts.EdgeRecommendation(v.ID)})
+		}
+		writeJSON(w, out)
+		return
+	}
+	s.mu.Lock()
+	cfg := *s.cfg
+	s.mu.Unlock()
+	client := &voiceclone.Client{BaseURL: cfg.MiniMax.BaseURL, APIKey: cfg.MiniMax.APIKey, Model: cfg.MiniMax.Model}
+	voices, err := client.ListVoices(r.Context(), voiceclone.VoiceTypeAll)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	s.mu.Lock()
+	s.mmVoices = append([]voiceclone.VoiceInfo(nil), voices...)
+	s.mu.Unlock()
+	type item struct {
+		ID         string `json:"id"`
+		Label      string `json:"label"`
+		Kind       string `json:"kind"`
+		Rating     int    `json:"rating,omitempty"`
+		PreviewURL string `json:"preview_url,omitempty"`
+	}
+	sorted := append([]voiceclone.VoiceInfo(nil), voices...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return tts.LessMiniMax(sorted[i].ID, sorted[i].Kind, sorted[j].ID, sorted[j].Kind)
+	})
+	out := make([]item, 0, len(sorted))
+	for _, v := range sorted {
+		level := tts.MiniMaxVoiceLevel(v.ID, v.Kind)
+		out = append(out, item{ID: v.ID, Label: tts.WithRatingMark(v.Display(), level), Kind: v.Kind, Rating: level, PreviewURL: v.PreviewURL()})
+	}
+	writeJSON(w, out)
+}
+
+func mergeWebSettings(dst, src *config.Config) {
+	if dst == nil || src == nil {
+		return
+	}
+	dst.LLM = src.LLM
+	if src.TTS.Voice != "" {
+		dst.TTS.Voice = src.TTS.Voice
+	}
+	if src.TTS.Engine != "" {
+		dst.TTS.Engine = src.TTS.Engine
+	}
+	if src.TTS.KokoroURL != "" {
+		dst.TTS.KokoroURL = src.TTS.KokoroURL
+	}
+	if src.TTS.OpenVoiceURL != "" {
+		dst.TTS.OpenVoiceURL = src.TTS.OpenVoiceURL
+	}
+	if src.TTS.OpenVoiceURL != "" || src.TTS.OpenVoiceReference != "" || tts.NormalizeEngine(src.TTS.Engine) == tts.EngineOpenVoice {
+		dst.TTS.OpenVoiceReference = src.TTS.OpenVoiceReference
+	}
+	if src.TTS.IndexTTS2URL != "" {
+		dst.TTS.IndexTTS2URL = src.TTS.IndexTTS2URL
+	}
+	if src.TTS.IndexTTS2URL != "" || src.TTS.IndexTTS2Reference != "" || tts.NormalizeEngine(src.TTS.Engine) == tts.EngineIndexTTS2 {
+		dst.TTS.IndexTTS2Reference = src.TTS.IndexTTS2Reference
+	}
+	if src.TTS.Speed != 0 {
+		dst.TTS.Speed = src.TTS.Speed
+	}
+	if src.TTS.Volume != 0 {
+		dst.TTS.Volume = src.TTS.Volume
+	}
+	dst.TTS.Pitch = src.TTS.Pitch
+	if src.FFmpeg.Path != "" || src.FFmpeg.FFprobePath != "" {
+		if src.FFmpeg.Path != "" {
+			dst.FFmpeg.Path = src.FFmpeg.Path
+		}
+		if src.FFmpeg.FFprobePath != "" {
+			dst.FFmpeg.FFprobePath = src.FFmpeg.FFprobePath
+		}
+	}
+	dst.UI.TargetDurationSec = src.UI.TargetDurationSec
+	dst.UI.SubtitleHideOnOriginal = src.UI.SubtitleHideOnOriginal
+	// Overlay extended UI/TTS fields when the form provided them.
+	if src.UI.AspectRatio != "" {
+		dst.UI.AspectRatio = src.UI.AspectRatio
+	}
+	if src.UI.Resolution != "" {
+		dst.UI.Resolution = src.UI.Resolution
+	}
+	if src.UI.SubtitleFont != "" {
+		dst.UI.SubtitleFont = src.UI.SubtitleFont
+	}
+	if src.UI.SubtitleFontSize != 0 {
+		dst.UI.SubtitleFontSize = src.UI.SubtitleFontSize
+	}
+	if src.UI.SubtitleColor != "" {
+		dst.UI.SubtitleColor = src.UI.SubtitleColor
+	}
+	if src.UI.SubtitlePosition != "" {
+		dst.UI.SubtitlePosition = src.UI.SubtitlePosition
+	}
+	// Only apply these booleans when the payload is a render form (has aspect/font).
+	if src.UI.SubtitleFont != "" || src.UI.AspectRatio != "" || src.UI.Resolution != "" || src.UI.BGMSource != "" {
+		dst.UI.SubtitleBurnEnabled = src.UI.SubtitleBurnEnabled
+		dst.UI.SubtitleMaskEnabled = src.UI.SubtitleMaskEnabled
+	}
+	if src.UI.SubtitleMaskY != 0 {
+		dst.UI.SubtitleMaskY = src.UI.SubtitleMaskY
+	}
+	if src.UI.SubtitleMaskHeight != 0 {
+		dst.UI.SubtitleMaskHeight = src.UI.SubtitleMaskHeight
+	}
+	if src.UI.SubtitleMaskX != 0 {
+		dst.UI.SubtitleMaskX = src.UI.SubtitleMaskX
+	}
+	if src.UI.SubtitleMaskWidth != 0 {
+		dst.UI.SubtitleMaskWidth = src.UI.SubtitleMaskWidth
+	}
+	if src.UI.SubtitleMaskBlur != 0 {
+		dst.UI.SubtitleMaskBlur = src.UI.SubtitleMaskBlur
+	}
+	if src.UI.SubtitleMaskOpacity != 0 {
+		dst.UI.SubtitleMaskOpacity = src.UI.SubtitleMaskOpacity
+	}
+	if src.UI.VoiceVolume != 0 {
+		dst.UI.VoiceVolume = src.UI.VoiceVolume
+	}
+	if src.UI.OriginalVolume != 0 {
+		dst.UI.OriginalVolume = src.UI.OriginalVolume
+	}
+	if src.UI.BGMSource != "" {
+		dst.UI.BGMSource = src.UI.BGMSource
+	}
+	dst.UI.BGMPath = src.UI.BGMPath
+	if src.UI.BGMVolume != 0 {
+		dst.UI.BGMVolume = src.UI.BGMVolume
+	}
+	if src.UI.BGMLibraryDir != "" {
+		dst.UI.BGMLibraryDir = src.UI.BGMLibraryDir
+	}
+	if src.UI.SFXPrompt != "" {
+		dst.UI.SFXPrompt = src.UI.SFXPrompt
+	}
+	if src.UI.SFXVolume != 0 {
+		dst.UI.SFXVolume = src.UI.SFXVolume
+	}
+	if src.Paths.ProjectsRoot != "" {
+		dst.Paths.ProjectsRoot = src.Paths.ProjectsRoot
+	}
+	if src.Replicate.BaseURL != "" || src.Replicate.APIKey != "" || src.Replicate.Model != "" {
+		if src.Replicate.BaseURL != "" {
+			dst.Replicate.BaseURL = src.Replicate.BaseURL
+		}
+		if src.Replicate.APIKey != "" {
+			dst.Replicate.APIKey = src.Replicate.APIKey
+		}
+		if src.Replicate.Model != "" {
+			dst.Replicate.Model = src.Replicate.Model
+		}
+		if src.Replicate.Frames != 0 {
+			dst.Replicate.Frames = src.Replicate.Frames
+		}
+		if src.Replicate.SegmentSec != 0 {
+			dst.Replicate.SegmentSec = src.Replicate.SegmentSec
+		}
+	}
+	if src.MiniMax.BaseURL != "" || src.MiniMax.APIKey != "" || src.MiniMax.Model != "" {
+		if src.MiniMax.BaseURL != "" {
+			dst.MiniMax.BaseURL = src.MiniMax.BaseURL
+		}
+		if src.MiniMax.APIKey != "" {
+			dst.MiniMax.APIKey = src.MiniMax.APIKey
+		}
+		if src.MiniMax.Model != "" {
+			dst.MiniMax.Model = src.MiniMax.Model
+		}
+	}
+	if src.Sonilo.BaseURL != "" || src.Sonilo.APIKey != "" || src.Sonilo.BGMPrompt != "" {
+		if src.Sonilo.BaseURL != "" {
+			dst.Sonilo.BaseURL = src.Sonilo.BaseURL
+		}
+		if src.Sonilo.APIKey != "" {
+			dst.Sonilo.APIKey = src.Sonilo.APIKey
+		}
+		if src.Sonilo.BGMPrompt != "" {
+			dst.Sonilo.BGMPrompt = src.Sonilo.BGMPrompt
+		}
+	}
+}
+
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(v)
+}
+
+func previewURLForVoice(voices []voiceclone.VoiceInfo, id string) string {
+	id = strings.TrimSpace(id)
+	for _, v := range voices {
+		if v.ID == id {
+			return v.PreviewURL()
+		}
+	}
+	return ""
+}
+
+func officialPreviewFileName(url, voiceID string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(voiceID) + "\n" + strings.TrimSpace(url)))
+	ext := ".mp3"
+	u := strings.ToLower(url)
+	switch {
+	case strings.Contains(u, ".wav"):
+		ext = ".wav"
+	case strings.Contains(u, ".m4a"):
+		ext = ".m4a"
+	case strings.Contains(u, ".ogg"):
+		ext = ".ogg"
+	}
+	return "official_" + hex.EncodeToString(sum[:8]) + ext
 }

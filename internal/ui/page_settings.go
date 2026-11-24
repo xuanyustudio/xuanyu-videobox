@@ -18,6 +18,7 @@ import (
 	"github.com/narratoai/narrato-go/internal/linkdl"
 	"github.com/narratoai/narrato-go/internal/project"
 	"github.com/narratoai/narrato-go/internal/replicate"
+	"github.com/narratoai/narrato-go/internal/tts"
 )
 
 const (
@@ -110,6 +111,41 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 	mmModel.SetText(state.Cfg.MiniMax.Model)
 	mmModel.SetPlaceHolder("speech-2.8-hd")
 
+	kokoroURL := widget.NewEntry()
+	if v := strings.TrimSpace(state.Cfg.TTS.KokoroURL); v != "" {
+		kokoroURL.SetText(v)
+	} else {
+		kokoroURL.SetText(tts.DefaultKokoroURL)
+	}
+	kokoroURL.SetPlaceHolder(tts.DefaultKokoroURL)
+	openvoiceURL := widget.NewEntry()
+	if v := strings.TrimSpace(state.Cfg.TTS.OpenVoiceURL); v != "" {
+		openvoiceURL.SetText(v)
+	} else {
+		openvoiceURL.SetText(tts.DefaultOpenVoiceURL)
+	}
+	openvoiceURL.SetPlaceHolder(tts.DefaultOpenVoiceURL)
+	ovRef := widget.NewEntry()
+	ovRef.SetText(state.Cfg.TTS.OpenVoiceReference)
+	ovRef.SetPlaceHolder("克隆音色用的参考 wav/mp3，可留空")
+	indextts2URL := widget.NewEntry()
+	if v := strings.TrimSpace(state.Cfg.TTS.IndexTTS2URL); v != "" {
+		indextts2URL.SetText(v)
+	} else {
+		indextts2URL.SetText(tts.DefaultIndexTTS2URL)
+	}
+	indextts2URL.SetPlaceHolder(tts.DefaultIndexTTS2URL)
+	ixRef := widget.NewEntry()
+	ixRef.SetText(state.Cfg.TTS.IndexTTS2Reference)
+	ixRef.SetPlaceHolder("仅克隆音色需要；选官方示例时不必填")
+
+	snBaseURL := widget.NewEntry()
+	snBaseURL.SetText(state.Cfg.Sonilo.BaseURL)
+	snBaseURL.SetPlaceHolder("https://api.sonilo.com")
+	snAPIKey := widget.NewPasswordEntry()
+	snAPIKey.SetText(state.Cfg.Sonilo.APIKey)
+	snAPIKey.SetPlaceHolder("可选：用于合成页的 AI 配乐与音效")
+
 	hideCheck := widget.NewCheck("原片段隐藏解说字幕", func(bool) {})
 	hideCheck.SetChecked(state.Cfg.UI.SubtitleHideOnOriginal)
 
@@ -198,6 +234,25 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 		state.Cfg.MiniMax.BaseURL = strings.TrimSpace(mmBaseURL.Text)
 		state.Cfg.MiniMax.APIKey = strings.TrimSpace(mmAPIKey.Text)
 		state.Cfg.MiniMax.Model = strings.TrimSpace(mmModel.Text)
+		if v := strings.TrimSpace(kokoroURL.Text); v != "" {
+			state.Cfg.TTS.KokoroURL = v
+		} else {
+			state.Cfg.TTS.KokoroURL = tts.DefaultKokoroURL
+		}
+		if v := strings.TrimSpace(openvoiceURL.Text); v != "" {
+			state.Cfg.TTS.OpenVoiceURL = v
+		} else {
+			state.Cfg.TTS.OpenVoiceURL = tts.DefaultOpenVoiceURL
+		}
+		state.Cfg.TTS.OpenVoiceReference = strings.TrimSpace(ovRef.Text)
+		if v := strings.TrimSpace(indextts2URL.Text); v != "" {
+			state.Cfg.TTS.IndexTTS2URL = v
+		} else {
+			state.Cfg.TTS.IndexTTS2URL = tts.DefaultIndexTTS2URL
+		}
+		state.Cfg.TTS.IndexTTS2Reference = strings.TrimSpace(ixRef.Text)
+		state.Cfg.Sonilo.BaseURL = strings.TrimSpace(snBaseURL.Text)
+		state.Cfg.Sonilo.APIKey = strings.TrimSpace(snAPIKey.Text)
 		linkdl.ConfigureDouyin(state.Cfg.Douyin.BaseURL, state.Cfg.Douyin.APIKey)
 		if err := config.Save(state.CfgPath, state.Cfg); err != nil {
 			status.SetText(fmt.Sprintf("保存失败: %v", err))
@@ -254,6 +309,17 @@ func newSettingsPage(state *AppState) fyne.CanvasObject {
 			widget.NewLabel("API 地址"), mmBaseURL,
 			widget.NewLabel("API Key"), container.NewBorder(nil, nil, nil, mmLinks, mmAPIKey),
 			widget.NewLabel("合成模型"), mmModel,
+		)),
+		settingsCard("本地配音", "请先双击运行对应启动脚本，再在合成页选择引擎。Kokoro：E:\\kokoro-tts\\启动Kokoro.bat；OpenVoice：E:\\OpenVoice\\启动配音服务.bat；IndexTTS-2：E:\\indextts2\\启动IndexTTS2.bat（不要占用 FunASR 的 7860 端口）", settingsForm(
+			widget.NewLabel("Kokoro 地址"), kokoroURL,
+			widget.NewLabel("OpenVoice 地址"), openvoiceURL,
+			widget.NewLabel("OpenVoice 参考音频"), ovRef,
+			widget.NewLabel("IndexTTS-2 地址"), indextts2URL,
+			widget.NewLabel("IndexTTS-2 参考音频"), ixRef,
+		)),
+		settingsCard("Sonilo", "可选。用于成片合成的 AI 配乐与 AI 音效，不填写则只能使用曲库或本地 BGM", settingsForm(
+			widget.NewLabel("API 地址"), snBaseURL,
+			widget.NewLabel("API Key"), snAPIKey,
 		)),
 		settingsCard("生图", "四视图使用；地址或密钥留空时沿用视觉模型设置", settingsForm(
 			widget.NewLabel("Base URL"), imgBaseURL,

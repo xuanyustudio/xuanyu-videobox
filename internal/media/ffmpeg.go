@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // ResolveFFmpeg locates the ffmpeg binary: config path, then beside besideDir, then PATH.
@@ -19,6 +20,37 @@ func ResolveFFmpeg(configPath, besideDir string) (string, error) {
 // ResolveFFprobe locates the ffprobe binary: config path, then beside besideDir, then PATH.
 func ResolveFFprobe(configPath, besideDir string) (string, error) {
 	return resolveBinary(configPath, besideDir, "ffprobe")
+}
+
+// ResolveFFplay locates ffplay: next to a known ffmpeg binary, then besideDir, then PATH.
+func ResolveFFplay(ffmpegPath, besideDir string) (string, error) {
+	var dirs []string
+	if strings.TrimSpace(ffmpegPath) != "" {
+		if st, err := os.Stat(ffmpegPath); err == nil {
+			if st.IsDir() {
+				dirs = append(dirs, ffmpegPath)
+			} else {
+				dirs = append(dirs, filepath.Dir(ffmpegPath))
+			}
+		}
+	}
+	if ff, err := ResolveFFmpeg(ffmpegPath, besideDir); err == nil {
+		dirs = append(dirs, filepath.Dir(ff))
+	}
+	seen := map[string]bool{}
+	for _, d := range dirs {
+		if d == "" || seen[d] {
+			continue
+		}
+		seen[d] = true
+		for _, base := range besideCandidateNames("ffplay") {
+			candidate := filepath.Join(d, base)
+			if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+				return candidate, nil
+			}
+		}
+	}
+	return resolveBinary("", besideDir, "ffplay")
 }
 
 func resolveBinary(configPath, besideDir, name string) (string, error) {

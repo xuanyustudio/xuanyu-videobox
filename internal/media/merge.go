@@ -53,63 +53,9 @@ func quoteConcatFilePath(path string) string {
 	return "'" + escaped + "'"
 }
 
-// MixTTSOntoVideo mixes delayed TTS inputs onto the video's audio bed.
-//
-// Phase 1: keep [0:a] when present; otherwise mix only the delayed TTS tracks.
-// Pipeline later may prepend a silent bed; here amix duration=longest covers both cases.
+// MixTTSOntoVideo mixes delayed TTS inputs onto the video's audio bed at equal volume.
 func MixTTSOntoVideo(ctx context.Context, bins FFmpegBins, videoPath string, ttsClips []TimedAudio, outPath string) error {
-	if bins.FFmpeg == "" {
-		return fmt.Errorf("ffmpeg binary required")
-	}
-	if len(ttsClips) == 0 {
-		return fmt.Errorf("no TTS clips to mix")
-	}
-
-	hasAudio, err := probeHasAudioStream(ctx, bins, videoPath)
-	if err != nil {
-		return err
-	}
-
-	args := []string{"-y", "-i", videoPath}
-	for _, clip := range ttsClips {
-		args = append(args, "-i", clip.Path)
-	}
-
-	filter := buildTTSMixFilter(hasAudio, len(ttsClips), ttsClips)
-	args = append(args,
-		"-filter_complex", filter,
-		"-map", "0:v",
-		"-map", "[aout]",
-	)
-	args = append(args, defaultVideoEncodeArgs()...)
-	args = append(args, defaultAudioEncodeArgs()...)
-	args = append(args, "-shortest", "-movflags", "+faststart", outPath)
-
-	_, err = Run(ctx, bins.FFmpeg, args...)
-	return err
-}
-
-func buildTTSMixFilter(hasVideoAudio bool, ttsCount int, clips []TimedAudio) string {
-	var b strings.Builder
-	inputLabels := make([]string, 0, ttsCount+1)
-
-	if hasVideoAudio {
-		b.WriteString("[0:a]aformat=sample_rates=44100:channel_layouts=stereo[abase];")
-		inputLabels = append(inputLabels, "[abase]")
-	}
-
-	for i, clip := range clips {
-		idx := i + 1
-		delayMs := int(clip.StartSec * 1000)
-		label := fmt.Sprintf("[t%d]", idx)
-		fmt.Fprintf(&b, "[%d:a]adelay=%d|%d,aformat=sample_rates=44100:channel_layouts=stereo%s;",
-			idx, delayMs, delayMs, label)
-		inputLabels = append(inputLabels, label)
-	}
-
-	b.WriteString(strings.Join(inputLabels, ""))
-	fmt.Fprintf(&b, "amix=inputs=%d:duration=longest:dropout_transition=0[aout]", len(inputLabels))
-	return b.String()
+	return MixAudioOntoVideo(ctx, bins, videoPath, ttsClips, MixOptions{OriginalVolume: 1, VoiceVolume: 1}, outPath)
 }
 
 func probeHasAudioStream(ctx context.Context, bins FFmpegBins, videoPath string) (bool, error) {

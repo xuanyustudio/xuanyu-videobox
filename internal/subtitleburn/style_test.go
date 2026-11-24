@@ -9,7 +9,7 @@ import (
 
 func TestForceStyle(t *testing.T) {
 	got := subtitleburn.ForceStyle(subtitleburn.DefaultStyle())
-	want := "FontSize=15,FontName=Arial,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1,MarginV=36"
+	want := "FontSize=15,FontName=Arial,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1,MarginV=36,Alignment=2"
 	if got != want {
 		t.Fatalf("default\n got %s\nwant %s", got, want)
 	}

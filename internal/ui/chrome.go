@@ -10,6 +10,8 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/narratoai/narrato-go/internal/media"
 )
 
 func currentColor(name fyne.ThemeColorName) color.Color {
@@ -145,6 +147,7 @@ func newRail(items []railItem) (rail, content fyne.CanvasObject) {
 		if i < 0 || i >= len(items) {
 			return
 		}
+		media.StopAudio()
 		for n, b := range btns {
 			if n == i {
 				b.Importance = widget.HighImportance

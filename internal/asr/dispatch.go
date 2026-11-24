@@ -21,6 +21,7 @@ type Options struct {
 	BailianAPIKey string
 	Hotword       string
 	EnableSpk     bool
+	FFmpeg        string // optional; used to extract audio from video before upload
 }
 
 // NormalizeBackend returns a known backend id.
@@ -48,14 +49,14 @@ func Transcribe(mediaPath, outPath string, opt Options) error {
 		if strings.TrimSpace(url) == "" {
 			url = DefaultFireRedAPIURL
 		}
-		c := &Client{APIURL: url}
+		c := &Client{APIURL: url, FFmpeg: opt.FFmpeg}
 		return c.TranscribeFireRed(mediaPath, outPath)
 	default:
 		url := opt.APIURL
 		if strings.TrimSpace(url) == "" {
 			url = DefaultAPIURL
 		}
-		c := &Client{APIURL: url, Hotword: opt.Hotword, EnableSpk: opt.EnableSpk}
+		c := &Client{APIURL: url, Hotword: opt.Hotword, EnableSpk: opt.EnableSpk, FFmpeg: opt.FFmpeg}
 		return c.TranscribeFile(mediaPath, outPath)
 	}
 }

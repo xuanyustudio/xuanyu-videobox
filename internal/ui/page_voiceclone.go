@@ -237,13 +237,20 @@ func newVoiceClonePage(state *AppState) fyne.CanvasObject {
 		state.Log.Append("[克隆音频] 试听音色 " + v.ID)
 		go func() {
 			client := clientFromSettings()
-			result, err := client.Synthesize(ctx, v.ID, text)
 			var saved string
-			if err == nil {
-				dir := filepath.Join(os.TempDir(), "xuanyu-voice-preview")
-				if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
-					err = mkErr
-				} else {
+			var err error
+			dir := filepath.Join(os.TempDir(), "xuanyu-voice-preview")
+			if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+				err = mkErr
+			} else if u := v.PreviewURL(); u != "" {
+				saved = filepath.Join(dir, "preview_"+officialPreviewFileName(u, v.ID))
+				if st, stErr := os.Stat(saved); stErr != nil || st.Size() < 2048 {
+					err = voiceclone.DownloadDemo(ctx, officialPreviewHTTPClient(), u, saved)
+				}
+			} else {
+				var result *voiceclone.SynthesizeResult
+				result, err = client.Synthesize(ctx, v.ID, text)
+				if err == nil {
 					saved = filepath.Join(dir, "preview_"+safeVoiceFileName(v.ID)+"."+extOrMP3(result.Format))
 					err = os.WriteFile(saved, result.Audio, 0o644)
 				}

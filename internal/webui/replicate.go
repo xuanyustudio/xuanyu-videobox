@@ -58,6 +58,7 @@ func (s *server) handleReplicateRun(w http.ResponseWriter, r *http.Request) {
 			BailianAPIKey: cfg.ASR.APIKey,
 			Hotword:       cfg.ASR.Hotword,
 			EnableSpk:     cfg.ASR.EnableSpk,
+			FFmpeg:        cfg.FFmpeg.Path,
 		},
 		Bins: media.FFmpegBins{
 			FFmpeg:  cfg.FFmpeg.Path,

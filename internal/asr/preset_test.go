@@ -103,9 +103,17 @@ func TestProbeSuccessAndRefused(t *testing.T) {
 func TestTranscribeFilePostsSenseVoiceModel(t *testing.T) {
 	var mu sync.Mutex
 	var model, format, endpoint string
+	var asrHits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.URL.Path == "/asr" {
+			mu.Lock()
+			asrHits++
+			mu.Unlock()
+			http.NotFound(w, r)
 			return
 		}
 		if r.URL.Path != "/v1/audio/transcriptions" {
@@ -127,13 +135,16 @@ func TestTranscribeFilePostsSenseVoiceModel(t *testing.T) {
 	defer srv.Close()
 
 	dir := t.TempDir()
-	media := filepath.Join(dir, "clip.mp4")
-	if err := os.WriteFile(media, []byte("not-a-real-media"), 0o644); err != nil {
+	media := filepath.Join(dir, "clip.wav")
+	if err := os.WriteFile(media, []byte("RIFF....WAVEfmt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "subtitles", "clip.srt")
 	if err := (&Client{APIURL: srv.URL}).TranscribeFile(media, out); err != nil {
 		t.Fatal(err)
+	}
+	if asrHits == 0 {
+		t.Fatal("expected /asr to be tried first")
 	}
 	if model != SenseVoiceModel || SenseVoiceModel != "sensevoice" {
 		t.Fatalf("model=%q const=%q", model, SenseVoiceModel)
@@ -146,6 +157,138 @@ func TestTranscribeFilePostsSenseVoiceModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), "字幕") {
+		t.Fatalf("srt=%q", data)
+	}
+}
+
+func TestTranscribeFilePrefersPackASR(t *testing.T) {
+	var mu sync.Mutex
+	var endpoint, filename, enableSpk, hotword string
+	var openaiHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.URL.Path == "/v1/audio/transcriptions" {
+			mu.Lock()
+			openaiHits++
+			mu.Unlock()
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path != "/asr" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		endpoint = r.URL.Path
+		enableSpk = r.FormValue("enable_spk")
+		hotword = r.FormValue("hotword")
+		if f, hdr, err := r.FormFile("file"); err == nil {
+			filename = hdr.Filename
+			_ = f.Close()
+		}
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"text":"你好","segments":[{"start":0,"end":1.0,"text":"你好"}]}`)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	media := filepath.Join(dir, "clip.wav")
+	if err := os.WriteFile(media, []byte("RIFF....WAVEfmt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.srt")
+	c := &Client{APIURL: srv.URL, EnableSpk: true, Hotword: "二次恋爱"}
+	if err := c.TranscribeFile(media, out); err != nil {
+		t.Fatal(err)
+	}
+	if openaiHits != 0 {
+		t.Fatalf("openai hits=%d, pack /asr should succeed first", openaiHits)
+	}
+	if endpoint != "/asr" || filename != "clip.wav" || enableSpk != "true" || hotword != "二次恋爱" {
+		t.Fatalf("endpoint=%q file=%q spk=%q hw=%q", endpoint, filename, enableSpk, hotword)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "你好") {
+		t.Fatalf("srt=%q", data)
+	}
+}
+
+func TestTranscribeFileExtractsVideoAudio(t *testing.T) {
+	var mu sync.Mutex
+	var gotName, gotBody, endpoint string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.URL.Path != "/asr" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		f, hdr, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		body, _ := io.ReadAll(f)
+		_ = f.Close()
+		mu.Lock()
+		gotName = hdr.Filename
+		gotBody = string(body)
+		endpoint = r.URL.Path
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"text":"抽出","segments":[{"start":0,"end":1.0,"text":"抽出"}]}`)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	media := filepath.Join(dir, "clip.mp4")
+	if err := os.WriteFile(media, []byte("not-a-real-media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.srt")
+	c := &Client{
+		APIURL: srv.URL,
+		extractAudio: func(src, dst string) error {
+			if src != media {
+				t.Fatalf("extract src=%q", src)
+			}
+			if !strings.HasSuffix(strings.ToLower(dst), ".wav") {
+				t.Fatalf("extract dst=%q", dst)
+			}
+			return os.WriteFile(dst, []byte("FAKEWAV"), 0o644)
+		},
+	}
+	if err := c.TranscribeFile(media, out); err != nil {
+		t.Fatal(err)
+	}
+	if endpoint != "/asr" || gotBody != "FAKEWAV" {
+		t.Fatalf("endpoint=%q body=%q name=%q", endpoint, gotBody, gotName)
+	}
+	if !strings.HasSuffix(strings.ToLower(gotName), ".wav") {
+		t.Fatalf("uploaded name should be wav, got %q", gotName)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "抽出") {
 		t.Fatalf("srt=%q", data)
 	}
 }

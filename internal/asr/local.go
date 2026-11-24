@@ -2,6 +2,7 @@ package asr
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/narratoai/narrato-go/internal/media"
 )
 
 const DefaultAPIURL = "http://127.0.0.1:7860"
@@ -32,8 +35,11 @@ type Client struct {
 	APIURL    string
 	Hotword   string
 	EnableSpk bool
+	FFmpeg    string
 	Timeout   time.Duration
 	HTTP      *http.Client
+	// extractAudio, if set, writes a wav to dst (tests).
+	extractAudio func(src, dst string) error
 }
 
 func (c *Client) baseURL() string {
@@ -81,29 +87,33 @@ func (c *Client) TranscribeFile(mediaPath, outPath string) error {
 	if err := c.Probe(); err != nil {
 		return err
 	}
+	uploadPath, cleanup, err := c.prepareUpload(mediaPath)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
 	base := c.baseURL()
 	openaiURL := base + "/v1/audio/transcriptions"
 	asrURL := base + "/asr"
 
-	var result map[string]any
-	var err error
-	result, err = c.postMultipart(openaiURL, mediaPath, map[string]string{
-		"model":           SenseVoiceModel,
-		"response_format": "verbose_json",
-		"spk":             spkFlag(c.EnableSpk),
-	})
+	fields := map[string]string{"enable_spk": spkFlag(c.EnableSpk)}
+	if hw := strings.TrimSpace(c.Hotword); hw != "" {
+		fields["hotword"] = hw
+	}
+	result, err := c.postMultipart(asrURL, uploadPath, fields)
 	if err != nil {
 		if isDialErr(err) {
 			return friendlyDialError(err, base)
 		}
-		fields := map[string]string{}
-		if hw := strings.TrimSpace(c.Hotword); hw != "" {
-			fields["hotword"] = hw
+		if !isNotFound(err) {
+			return err
 		}
-		if c.EnableSpk {
-			fields["enable_spk"] = "true"
-		}
-		result, err = c.postMultipart(asrURL, mediaPath, fields)
+		result, err = c.postMultipart(openaiURL, uploadPath, map[string]string{
+			"model":           SenseVoiceModel,
+			"response_format": "verbose_json",
+			"spk":             spkFlag(c.EnableSpk),
+		})
 		if err != nil {
 			if isDialErr(err) {
 				return friendlyDialError(err, base)
@@ -153,8 +163,13 @@ func (c *Client) TranscribeFireRed(mediaPath, outPath string) error {
 	if err := c.Probe(); err != nil {
 		return err
 	}
+	uploadPath, cleanup, err := c.prepareUpload(mediaPath)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	base := c.baseURL()
-	result, err := c.postMultipart(base+"/asr", mediaPath, map[string]string{
+	result, err := c.postMultipart(base+"/asr", uploadPath, map[string]string{
 		"enable_vad":       "true",
 		"enable_lid":       "true",
 		"enable_punc":      "true",
@@ -238,6 +253,86 @@ func fireRedSentencesToSRT(sents []any) (string, error) {
 		return "", fmt.Errorf("FireRed 结果为空")
 	}
 	return b.String(), nil
+}
+
+func isAudioFile(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".wav", ".mp3", ".m4a", ".flac", ".aac", ".ogg", ".opus", ".wma":
+		return true
+	default:
+		return false
+	}
+}
+
+func isNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "not found:")
+}
+
+func (c *Client) prepareUpload(mediaPath string) (string, func(), error) {
+	nop := func() {}
+	if isAudioFile(mediaPath) {
+		return mediaPath, nop, nil
+	}
+	tmp, err := os.CreateTemp("", "xuanyu-asr-*.wav")
+	if err != nil {
+		return "", nop, err
+	}
+	dst := tmp.Name()
+	tmp.Close()
+	cleanup := func() { _ = os.Remove(dst) }
+	if err := c.extractTrack(mediaPath, dst); err != nil {
+		cleanup()
+		return "", nop, err
+	}
+	return dst, cleanup, nil
+}
+
+func (c *Client) extractTrack(src, dst string) error {
+	if c.extractAudio != nil {
+		return c.extractAudio(src, dst)
+	}
+	ffmpeg, err := c.resolveFFmpeg()
+	if err != nil || strings.TrimSpace(ffmpeg) == "" {
+		return fmt.Errorf("识别视频需要先抽出音轨，请在「设置」里填写 ffmpeg 路径，或把 ffmpeg 加入系统 PATH")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	log, err := media.Run(ctx, ffmpeg,
+		"-y",
+		"-i", src,
+		"-map", "0:a:0",
+		"-vn",
+		"-ac", "1",
+		"-ar", "16000",
+		"-c:a", "pcm_s16le",
+		dst,
+	)
+	if err != nil {
+		_ = os.Remove(dst)
+		msg := strings.TrimSpace(log)
+		if msg == "" {
+			msg = err.Error()
+		}
+		lower := strings.ToLower(msg)
+		if strings.Contains(lower, "does not contain any stream") || strings.Contains(msg, "Stream map '0:a:0'") {
+			return fmt.Errorf("这个视频没有音轨，无法识别字幕")
+		}
+		return fmt.Errorf("抽音频失败: %s", truncate(msg, 240))
+	}
+	st, err := os.Stat(dst)
+	if err != nil || st.Size() == 0 {
+		_ = os.Remove(dst)
+		return fmt.Errorf("抽音频完成但没有生成可用的音轨文件")
+	}
+	return nil
+}
+
+func (c *Client) resolveFFmpeg() (string, error) {
+	beside := ""
+	if exe, err := os.Executable(); err == nil {
+		beside = filepath.Dir(exe)
+	}
+	return media.ResolveFFmpeg(c.FFmpeg, beside)
 }
 
 func (c *Client) postMultipart(endpoint, mediaPath string, fields map[string]string) (map[string]any, error) {

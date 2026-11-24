@@ -192,8 +192,44 @@ func (c *Client) CloneVoice(ctx context.Context, fileID, voiceID string, opt Clo
 	return &CloneResult{VoiceID: voiceID, FileID: fileID, DemoAudio: parsed.DemoAudio}, nil
 }
 
-// Synthesize generates speech with a cloned (or system) voice_id.
+// SynthesizeOptions controls MiniMax T2A rate, volume and pitch.
+// Zero Speed/Vol fall back to 1; Pitch 0 is a valid value.
+type SynthesizeOptions struct {
+	Speed float64
+	Vol   float64
+	Pitch int
+}
+
+func clampSynthOpt(v, lo, hi, fallback float64) float64 {
+	if v == 0 {
+		return fallback
+	}
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func clampPitch(p int) int {
+	if p < -12 {
+		return -12
+	}
+	if p > 12 {
+		return 12
+	}
+	return p
+}
+
+// Synthesize generates speech with a cloned (or system) voice_id at default rate/volume/pitch.
 func (c *Client) Synthesize(ctx context.Context, voiceID, text string) (*SynthesizeResult, error) {
+	return c.SynthesizeWith(ctx, voiceID, text, SynthesizeOptions{})
+}
+
+// SynthesizeWith generates speech with explicit speed, volume and pitch.
+func (c *Client) SynthesizeWith(ctx context.Context, voiceID, text string, opt SynthesizeOptions) (*SynthesizeResult, error) {
 	if strings.TrimSpace(c.APIKey) == "" {
 		return nil, fmt.Errorf("请先在「设置」里填写 MiniMax API Key")
 	}
@@ -208,6 +244,9 @@ func (c *Client) Synthesize(ctx context.Context, voiceID, text string) (*Synthes
 	if voiceID == "" {
 		return nil, fmt.Errorf("请先克隆音色，或填写已有的音色 ID")
 	}
+	speed := clampSynthOpt(opt.Speed, 0.5, 2, 1)
+	vol := clampSynthOpt(opt.Vol, 0.1, 10, 1)
+	pitch := clampPitch(opt.Pitch)
 	payload := map[string]any{
 		"model":          c.model(),
 		"text":           text,
@@ -215,9 +254,9 @@ func (c *Client) Synthesize(ctx context.Context, voiceID, text string) (*Synthes
 		"language_boost": "auto",
 		"voice_setting": map[string]any{
 			"voice_id": voiceID,
-			"speed":    1,
-			"vol":      1,
-			"pitch":    0,
+			"speed":    speed,
+			"vol":      vol,
+			"pitch":    pitch,
 		},
 		"audio_setting": map[string]any{
 			"sample_rate": 32000,

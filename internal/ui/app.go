@@ -14,6 +14,7 @@ import (
 
 	"github.com/narratoai/narrato-go/internal/config"
 	"github.com/narratoai/narrato-go/internal/linkdl"
+	"github.com/narratoai/narrato-go/internal/media"
 	"github.com/narratoai/narrato-go/internal/project"
 )
 
@@ -110,6 +111,11 @@ func Run() {
 		container.NewTabItem("合成", renderPage),
 	)
 	workspaceTabs.SetTabLocation(container.TabLocationTop)
+	workspaceTabs.OnSelected = func(tab *container.TabItem) {
+		if tab == nil || tab.Text != "合成" {
+			media.StopAudio()
+		}
+	}
 
 	workspaceHeader := container.NewBorder(nil, nil, backBtn, nil, projTitle)
 	workspaceView := container.NewBorder(container.NewPadded(workspaceHeader), nil, nil, nil, workspaceTabs)
@@ -119,6 +125,7 @@ func Run() {
 
 	var showHome, showWorkspace func()
 	showHome = func() {
+		media.StopAudio()
 		workspaceView.Hide()
 		projectPage.Show()
 		homeStack.Refresh()
@@ -180,6 +187,9 @@ func Run() {
 	w.SetContent(container.NewBorder(nil, statusRow, rail, nil, content))
 	refreshProject()
 	trackIME(w)
+	w.SetOnClosed(func() {
+		media.StopAudio()
+	})
 	w.ShowAndRun()
 }
 

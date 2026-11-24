@@ -7,6 +7,7 @@
 <style>
   :root { --bg:#0f1419; --card:#1a2332; --text:#e7ecf3; --muted:#9aa7b8; --accent:#3d8bfd; --warn:#e6a23c; --ok:#3ecf8e; }
   * { box-sizing: border-box; }
+  html, body { height: auto; min-height: 100%; overflow-y: auto; }
   body { margin:0; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background:var(--bg); color:var(--text); }
   header { padding:16px 24px; border-bottom:1px solid #2a3545; display:flex; gap:12px; align-items:center; }
   h1 { margin:0; font-size:18px; font-weight:600; }
@@ -14,8 +15,8 @@
   nav { display:flex; gap:8px; padding:12px 24px; }
   nav button { background:#243044; color:var(--text); border:0; padding:8px 14px; border-radius:8px; cursor:pointer; }
   nav button.active { background:var(--accent); }
-  main { padding:0 24px 32px; max-width:980px; }
-  section { display:none; background:var(--card); border-radius:12px; padding:20px; margin-top:8px; }
+  main { padding:0 24px 80px; max-width:980px; }
+  section { display:none; background:var(--card); border-radius:12px; padding:20px; margin-top:8px; overflow: visible; }
   section.active { display:block; }
   label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
   input, textarea, select { width:100%; padding:8px 10px; border-radius:8px; border:1px solid #334155; background:#0f1724; color:var(--text); }
@@ -37,6 +38,31 @@
   .subtabs button.active { background:var(--accent); }
   .prompt-pane { display:none; }
   .prompt-pane.active { display:block; }
+
+  .voice-combo { position: relative; }
+  .voice-combo-btn {
+    width: 100%; text-align: left; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid #334155; background: #0f1724; color: var(--text);
+    cursor: pointer; font: inherit; line-height: 1.4;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .voice-combo-menu {
+    display: none; position: absolute; z-index: 50;
+    top: calc(100% + 4px); left: 0; right: 0;
+    max-height: min(280px, 50vh); overflow-y: auto;
+    background: #0f1724; border: 1px solid #334155; border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(0,0,0,.45);
+  }
+  .voice-combo-menu.open { display: block; }
+  .voice-combo-menu button {
+    display: block; width: 100%; text-align: left;
+    background: transparent; color: var(--text);
+    border: 0; padding: 8px 10px; cursor: pointer; font: inherit;
+  }
+  .voice-combo-menu button:hover { background: #243044; }
+  .voice-combo-menu button.active { background: #1d4ed8; color: #fff; }
+  .voice-combo-menu button .mark { color: var(--warn); margin-left: 8px; font-size: 12px; }
+  .voice-combo-menu button.active .mark { color: #ffe08a; }
 </style>
 </head>
 <body>
@@ -103,10 +129,103 @@
   </section>
 
   <section id="render">
-    <label>TTS 音色</label>
-    <input id="voice" value="zh-CN-XiaoxiaoNeural"/>
+    <div class="row cols-3">
+      <div>
+        <label>引擎</label>
+        <select id="ttsEngine">
+          <option value="edge" selected>Edge TTS</option>
+          <option value="minimax">MiniMax</option>
+          <option value="kokoro">Kokoro</option>
+          <option value="openvoice">OpenVoice</option>
+          <option value="indextts2">IndexTTS-2</option>
+        </select>
+      </div>
+      <div>
+        <label>音色</label>
+        <div class="voice-combo" id="voiceCombo">
+          <button type="button" class="voice-combo-btn" id="voiceSelectBtn" aria-haspopup="listbox">请选择音色</button>
+          <div class="voice-combo-menu" id="voiceSelectMenu" role="listbox"></div>
+        </div>
+        <input id="voice" value="zh-CN-XiaoxiaoNeural" style="margin-top:6px"/>
+        <p class="hint" id="engineHint"></p>
+        <div id="ovRefRow" style="display:none;margin-top:8px">
+          <label>OpenVoice 参考音频</label>
+          <input id="ovRef" placeholder="克隆音色用的 wav/mp3 路径"/>
+        </div>
+        <div id="ixRefRow" style="display:none;margin-top:8px">
+          <label>IndexTTS-2 参考音频</label>
+          <input id="ixRef" placeholder="仅克隆音色必填；选官方示例时不必填"/>
+        </div>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <div class="actions">
+          <button class="ghost" onclick="refreshVoices()">刷新音色</button>
+          <button class="ghost" id="previewVoiceBtn" onclick="previewVoice()">预听</button>
+        </div>
+      </div>
+    </div>
+    <div class="row cols-3">
+      <div><label>语速</label><input id="ttsSpeed" type="number" min="0.5" max="2" step="0.05" value="1"/></div>
+      <div><label>合成音量</label><input id="ttsVolume" type="number" min="0.1" max="2" step="0.05" value="1"/></div>
+      <div><label>音调（-12～12）</label><input id="ttsPitch" type="number" min="-12" max="12" step="1" value="0"/></div>
+    </div>
+    <div class="row cols-3">
+      <div><label>原声音量</label><input id="origVolume" type="number" min="0" max="2" step="0.05" value="1.2"/></div>
+      <div><label>配音音量</label><input id="voiceVolume" type="number" min="0" max="2" step="0.05" value="1"/></div>
+      <div><label>BGM 音量</label><input id="bgmVolume" type="number" min="0" max="2" step="0.05" value="0.3"/></div>
+    </div>
+    <div class="row cols-3">
+      <div>
+        <label>BGM 来源</label>
+        <select id="bgmSource">
+          <option value="off" selected>关闭</option>
+          <option value="library">曲库路径</option>
+          <option value="upload">本地文件</option>
+          <option value="sonilo">Sonilo AI 配乐</option>
+        </select>
+      </div>
+      <div><label>BGM 路径</label><input id="bgmPath" placeholder="曲库或本地音频文件"/></div>
+      <div><label>Sonilo 配乐提示</label><input id="soniloBgmPrompt"/></div>
+    </div>
+    <label><input id="sfxEnabled" type="checkbox"/> 开启 AI 音效（Sonilo，默认关闭）</label>
+    <div class="row cols-3">
+      <div><label>音效提示</label><input id="sfxPrompt"/></div>
+      <div><label>音效音量</label><input id="sfxVolume" type="number" min="0" max="2" step="0.05" value="0.6"/></div>
+    </div>
+    <label><input id="burnSubs" type="checkbox" checked/> 烧录解说字幕</label>
+    <label><input id="hideOstRender" type="checkbox" checked/> 原片段隐藏解说字幕</label>
+    <div class="row cols-3">
+      <div><label>字体</label><input id="subFont" value="Microsoft YaHei"/></div>
+      <div><label>字号</label><input id="subSize" type="number" min="10" max="72" value="15"/></div>
+      <div><label>颜色</label><input id="subColor" value="#FFFFFF"/></div>
+    </div>
+    <div class="row cols-3">
+      <div>
+        <label>位置</label>
+        <select id="subPos"><option value="bottom" selected>底部</option><option value="top">顶部</option><option value="center">居中</option></select>
+      </div>
+      <div>
+        <label>画面比例</label>
+        <select id="aspect"><option value="source">源视频</option><option value="vertical" selected>竖屏 9:16</option><option value="horizontal">横屏 16:9</option></select>
+      </div>
+      <div>
+        <label>清晰度</label>
+        <select id="resolution">
+          <option>480p</option><option>720p</option><option selected>1080p</option><option>1440p</option><option>2160p</option>
+        </select>
+      </div>
+    </div>
+    <label><input id="maskEnabled" type="checkbox"/> 启用原字幕遮罩</label>
+    <div class="row cols-3">
+      <div><label>遮罩垂直位置 %</label><input id="maskY" type="number" min="0" max="99" value="79"/></div>
+      <div><label>遮罩高度 %</label><input id="maskH" type="number" min="2" max="60" value="16"/></div>
+      <div><label>遮罩不透明度</label><input id="maskOp" type="number" min="0" max="100" value="84"/></div>
+    </div>
     <div class="actions">
       <button class="primary" onclick="startRender()">开始合成</button>
+      <button class="ghost" onclick="cancelRender()">取消任务</button>
+      <button class="ghost" onclick="openOutput()">打开成片</button>
     </div>
     <p class="hint" id="progressHint">进度 0%</p>
     <pre class="log" id="logs"></pre>
@@ -204,7 +323,27 @@
     <input id="repModel" placeholder="Qwen/Qwen3-VL-8B-Instruct"/>
     <label>目标总长（秒）</label>
     <input id="targetSec" type="number" value="180"/>
-    <label><input id="hideOst" type="checkbox" checked/> 原声时段隐藏字幕与模糊</label>
+    <label><input id="hideOst" type="checkbox" checked/> 原声时段隐藏解说字幕</label>
+    <label>MiniMax API 地址</label>
+    <input id="mmBaseUrl" placeholder="https://api.minimax.cn"/>
+    <label>MiniMax API Key</label>
+    <input id="mmApiKey" type="password"/>
+    <label>MiniMax 合成模型</label>
+    <input id="mmModel" placeholder="speech-2.8-hd"/>
+    <label>Kokoro 地址（先运行 E:\kokoro-tts\启动Kokoro.bat）</label>
+    <input id="kokoroUrl" placeholder="http://127.0.0.1:3211"/>
+    <label>OpenVoice 地址（先运行 E:\OpenVoice\启动配音服务.bat，端口 3212）</label>
+    <input id="openvoiceUrl" placeholder="http://127.0.0.1:3212"/>
+    <label>OpenVoice 参考音频（克隆音色）</label>
+    <input id="ovRefSettings" placeholder="参考 wav/mp3 路径，可留空"/>
+    <label>IndexTTS-2 地址（先运行 E:\indextts2\启动IndexTTS2.bat，端口 3213）</label>
+    <input id="indextts2Url" placeholder="http://127.0.0.1:3213"/>
+    <label>IndexTTS-2 参考音频（克隆音色）</label>
+    <input id="ixRefSettings" placeholder="仅克隆音色需要的参考 wav/mp3；选官方示例时不必填"/>
+    <label>Sonilo API 地址</label>
+    <input id="snBaseUrl" placeholder="https://api.sonilo.com"/>
+    <label>Sonilo API Key（可选，AI 配乐/音效）</label>
+    <input id="snApiKey" type="password"/>
     <div class="actions">
       <button class="primary" onclick="saveSettings()">保存设置</button>
     </div>
@@ -216,14 +355,18 @@ const $ = (id) => document.getElementById(id);
 let state = null;
 let repLast = null;
 
+document.getElementById('ttsEngine')?.addEventListener('change', () => { applyEngineHint(); refreshVoices(); });
 document.querySelectorAll('nav button').forEach(btn => {
   btn.onclick = () => {
+    const leavingRender = document.querySelector('nav button.active')?.dataset.tab === 'render' && btn.dataset.tab !== 'render';
     document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
     btn.classList.add('active');
     $(btn.dataset.tab).classList.add('active');
+    if (leavingRender) stopVoicePreview(true);
   };
 });
+window.addEventListener('pagehide', () => { stopVoicePreview(true); });
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -243,6 +386,46 @@ function fillSettings(cfg, cfgPath, root) {
   $('targetSec').value = cfg.ui?.target_duration_sec || 180;
   $('hideOst').checked = !!cfg.ui?.subtitle_hide_on_original;
   $('voice').value = cfg.tts?.voice || 'zh-CN-XiaoxiaoNeural';
+  const eng = (cfg.tts?.engine || 'edge').toLowerCase();
+  $('ttsEngine').value = ['edge','minimax','kokoro','openvoice','indextts2'].includes(eng) ? eng : 'edge';
+  $('kokoroUrl').value = cfg.tts?.kokoro_url || 'http://127.0.0.1:3211';
+  $('openvoiceUrl').value = cfg.tts?.openvoice_url || 'http://127.0.0.1:3212';
+  if ($('indextts2Url')) $('indextts2Url').value = cfg.tts?.indextts2_url || 'http://127.0.0.1:3213';
+  const ovRef = cfg.tts?.openvoice_reference || '';
+  if ($('ovRef')) $('ovRef').value = ovRef;
+  if ($('ovRefSettings')) $('ovRefSettings').value = ovRef;
+  const ixRef = cfg.tts?.indextts2_reference || '';
+  if ($('ixRef')) $('ixRef').value = ixRef;
+  if ($('ixRefSettings')) $('ixRefSettings').value = ixRef;
+  $('ttsSpeed').value = cfg.tts?.speed || 1;
+  $('ttsVolume').value = cfg.tts?.volume || 1;
+  $('ttsPitch').value = cfg.tts?.pitch || 0;
+  $('origVolume').value = cfg.ui?.original_volume || 1.2;
+  $('voiceVolume').value = cfg.ui?.voice_volume || 1;
+  $('bgmVolume').value = cfg.ui?.bgm_volume || 0.3;
+  $('bgmSource').value = cfg.ui?.bgm_source || 'off';
+  $('bgmPath').value = cfg.ui?.bgm_path || '';
+  $('soniloBgmPrompt').value = cfg.sonilo?.bgm_prompt || '';
+  $('sfxEnabled').checked = !!cfg.ui?.sfx_enabled;
+  $('sfxPrompt').value = cfg.ui?.sfx_prompt || '';
+  $('sfxVolume').value = cfg.ui?.sfx_volume || 0.6;
+  $('burnSubs').checked = cfg.ui?.subtitle_burn_enabled !== false;
+  $('hideOstRender').checked = !!cfg.ui?.subtitle_hide_on_original;
+  $('subFont').value = cfg.ui?.subtitle_font || 'Microsoft YaHei';
+  $('subSize').value = cfg.ui?.subtitle_font_size || 15;
+  $('subColor').value = cfg.ui?.subtitle_color || '#FFFFFF';
+  $('subPos').value = cfg.ui?.subtitle_position || 'bottom';
+  $('aspect').value = cfg.ui?.aspect_ratio || 'vertical';
+  $('resolution').value = cfg.ui?.resolution || '1080p';
+  $('maskEnabled').checked = !!cfg.ui?.subtitle_mask_enabled;
+  $('maskY').value = cfg.ui?.subtitle_mask_y || 79;
+  $('maskH').value = cfg.ui?.subtitle_mask_height || 16;
+  $('maskOp').value = cfg.ui?.subtitle_mask_opacity || 84;
+  $('mmBaseUrl').value = cfg.minimax?.base_url || '';
+  $('mmApiKey').value = cfg.minimax?.api_key || '';
+  $('mmModel').value = cfg.minimax?.model || '';
+  $('snBaseUrl').value = cfg.sonilo?.base_url || '';
+  $('snApiKey').value = cfg.sonilo?.api_key || '';
   $('repBaseUrl').value = cfg.replicate?.base_url || '';
   $('repApiKey').value = cfg.replicate?.api_key || '';
   $('repModel').value = cfg.replicate?.model || '';
@@ -250,6 +433,44 @@ function fillSettings(cfg, cfgPath, root) {
   $('cfgPath').textContent = '配置文件: ' + cfgPath;
   $('projRoot').textContent = '工程目录: ' + root;
   if ($('linkdlOutDir') && !$('linkdlOutDir').value) $('linkdlOutDir').value = root || '';
+  applyEngineHint();
+}
+
+function applyEngineHint() {
+  const eng = $('ttsEngine') ? $('ttsEngine').value : '';
+  const hint = $('engineHint');
+  const row = $('ovRefRow');
+  const ixRow = $('ixRefRow');
+  if (hint) {
+    if (eng === 'kokoro') hint.textContent = '请先双击运行 E:\\kokoro-tts\\启动Kokoro.bat（http://127.0.0.1:3211）';
+    else if (eng === 'openvoice') hint.textContent = '请先双击运行 E:\\OpenVoice\\启动配音服务.bat（http://127.0.0.1:3212）。克隆音色需要参考音频。';
+    else if (eng === 'indextts2') hint.textContent = '请先双击运行 E:\\indextts2\\启动IndexTTS2.bat（http://127.0.0.1:3213）。下拉里的「官方示例 01」等可直接用，不必另选参考音频；「克隆音色」需要先选择一段 wav/mp3。';
+    else hint.textContent = '';
+  }
+  if (row) row.style.display = eng === 'openvoice' ? '' : 'none';
+  if (ixRow) ixRow.style.display = eng === 'indextts2' ? '' : 'none';
+}
+
+function openvoiceReference() {
+  const a = $('ovRef') && $('ovRef').value.trim();
+  const b = $('ovRefSettings') && $('ovRefSettings').value.trim();
+  return a || b || '';
+}
+
+function indextts2Reference() {
+  const a = $('ixRef') && $('ixRef').value.trim();
+  const b = $('ixRefSettings') && $('ixRefSettings').value.trim();
+  return a || b || '';
+}
+
+function localTTSFields() {
+  return {
+    kokoro_url: ($('kokoroUrl') && $('kokoroUrl').value.trim()) || 'http://127.0.0.1:3211',
+    openvoice_url: ($('openvoiceUrl') && $('openvoiceUrl').value.trim()) || 'http://127.0.0.1:3212',
+    openvoice_reference: openvoiceReference(),
+    indextts2_url: ($('indextts2Url') && $('indextts2Url').value.trim()) || 'http://127.0.0.1:3213',
+    indextts2_reference: indextts2Reference()
+  };
 }
 
 function fillProject(p) {
@@ -270,6 +491,7 @@ async function refresh() {
   state = await api('/api/state');
   fillSettings(state.cfg, state.cfg_path, state.projects_root);
   fillProject(state.project);
+  refreshVoices().catch(()=>{});
   const hint = $('durationHint');
   if (state.project && (state.project.script_items||[]).length) {
     hint.textContent = `预计成片 ${state.estimated_clock}（约 ${Math.round(state.estimated_sec)}s） / 目标 ${state.target_sec}s`;
@@ -344,12 +566,11 @@ async function applyScriptJson() {
 async function saveSettings() {
   const cfg = {
     llm: { base_url: $('baseUrl').value, api_key: $('apiKey').value, model: $('model').value },
-    tts: { voice: $('voice').value },
+    tts: Object.assign({ voice: $('voice').value, engine: $('ttsEngine').value }, localTTSFields()),
     ffmpeg: { path: $('ffmpeg').value, ffprobe_path: '' },
     ui: {
       target_duration_sec: +$('targetSec').value || 180,
-      subtitle_hide_on_original: $('hideOst').checked,
-      subtitle_mask_enabled: false
+      subtitle_hide_on_original: $('hideOst').checked
     },
     paths: { projects_root: $('projectsRoot').value },
     replicate: {
@@ -358,19 +579,213 @@ async function saveSettings() {
       model: $('repModel').value.trim(),
       frames: state?.cfg?.replicate?.frames || 8,
       segment_sec: +$('repSegmentSec').value || 15
-    }
+    },
+    minimax: { base_url: $('mmBaseUrl').value.trim(), api_key: $('mmApiKey').value.trim(), model: $('mmModel').value.trim() },
+    sonilo: { base_url: $('snBaseUrl').value.trim(), api_key: $('snApiKey').value.trim(), bgm_prompt: $('soniloBgmPrompt').value.trim() }
   };
   await api('/api/save_settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
   await refresh();
   alert('设置已保存');
 }
 
+function collectRenderSettings() {
+  const voice = $('voice').value;
+  return {
+    tts: {
+      voice,
+      engine: $('ttsEngine').value,
+      speed: +$('ttsSpeed').value || 1,
+      volume: +$('ttsVolume').value || 1,
+      pitch: +$('ttsPitch').value || 0,
+      kokoro_url: localTTSFields().kokoro_url,
+      openvoice_url: localTTSFields().openvoice_url,
+      openvoice_reference: localTTSFields().openvoice_reference,
+      indextts2_url: localTTSFields().indextts2_url,
+      indextts2_reference: localTTSFields().indextts2_reference
+    },
+    ui: {
+      target_duration_sec: state?.cfg?.ui?.target_duration_sec || 180,
+      subtitle_hide_on_original: $('hideOstRender').checked,
+      subtitle_burn_enabled: $('burnSubs').checked,
+      subtitle_font: $('subFont').value,
+      subtitle_font_size: +$('subSize').value || 15,
+      subtitle_color: $('subColor').value,
+      subtitle_position: $('subPos').value,
+      subtitle_mask_enabled: $('maskEnabled').checked,
+      subtitle_mask_y: +$('maskY').value || 0,
+      subtitle_mask_height: +$('maskH').value || 0,
+      subtitle_mask_opacity: +$('maskOp').value || 0,
+      aspect_ratio: $('aspect').value,
+      resolution: $('resolution').value,
+      voice_volume: +$('voiceVolume').value,
+      original_volume: +$('origVolume').value,
+      bgm_source: $('bgmSource').value,
+      bgm_path: $('bgmPath').value,
+      bgm_volume: +$('bgmVolume').value,
+      sfx_enabled: $('sfxEnabled').checked,
+      sfx_prompt: $('sfxPrompt').value,
+      sfx_volume: +$('sfxVolume').value
+    },
+    sonilo: {
+      base_url: $('snBaseUrl').value.trim(),
+      api_key: $('snApiKey').value.trim(),
+      bgm_prompt: $('soniloBgmPrompt').value.trim()
+    }
+  };
+}
+
 async function startRender() {
   try {
-    await api('/api/render', { method:'POST' });
+    await api('/api/render', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(collectRenderSettings()) });
     pollLogs();
   } catch (e) { alert(e.message || e); }
 }
+
+async function cancelRender() {
+  try { await api('/api/render/cancel', { method:'POST' }); } catch (e) { alert(e.message || e); }
+}
+
+async function openOutput() {
+  try { await api('/api/render/open', { method:'POST' }); } catch (e) { alert(e.message || e); }
+}
+
+let voicePreviewPlaying = false;
+
+async function stopVoicePreview(silent) {
+  const btn = $('previewVoiceBtn');
+  try {
+    await api('/api/tts/preview/stop', { method:'POST' });
+  } catch (e) {
+    if (!silent) alert(e.message || e);
+  }
+  voicePreviewPlaying = false;
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = '预听';
+  }
+  if (!silent) {
+    const hint = $('progressHint') || $('outHint');
+    if (hint) hint.textContent = '已停止预听';
+    const logs = $('logs');
+    if (logs) logs.textContent = (logs.textContent ? logs.textContent + '\n' : '') + '已停止预听';
+  }
+}
+
+async function previewVoice() {
+  const btn = $('previewVoiceBtn');
+  if (voicePreviewPlaying) {
+    await stopVoicePreview(false);
+    return;
+  }
+  if (btn) btn.disabled = true;
+  const hint = $('progressHint') || $('outHint');
+  if (hint) hint.textContent = '正在预听…';
+  try {
+    await saveRenderVoiceOnly();
+    const res = await api('/api/tts/preview', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
+    let src = '已合成试听';
+    if (res.source === 'official') src = '已使用官方样音（未调用合成）';
+    if (res.source === 'reference') src = '已播放参考音频（未调用合成）';
+    voicePreviewPlaying = true;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '停止';
+    }
+    if (hint) hint.textContent = src;
+    const logs = $('logs');
+    if (logs) logs.textContent = (logs.textContent ? logs.textContent + '\n' : '') + src + (res.text ? '：' + res.text : '');
+  } catch (e) {
+    voicePreviewPlaying = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '预听';
+    }
+    const msg = e.message || String(e);
+    if (hint) hint.textContent = '预听失败: ' + msg;
+    const logs = $('logs');
+    if (logs) logs.textContent = (logs.textContent ? logs.textContent + '\n' : '') + '预听失败: ' + msg;
+    alert('预听失败: ' + msg);
+  }
+}
+
+async function saveRenderVoiceOnly() {
+  const cfg = collectRenderSettings();
+  await api('/api/save_settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
+}
+
+function closeVoiceMenu() {
+  const menu = $('voiceSelectMenu');
+  if (menu) menu.classList.remove('open');
+}
+
+function renderVoiceOptions(list, currentId) {
+  const menu = $('voiceSelectMenu');
+  const btn = $('voiceSelectBtn');
+  const input = $('voice');
+  menu.innerHTML = '';
+  let chosen = null;
+  (list || []).forEach(v => {
+    const opt = document.createElement('button');
+    opt.type = 'button';
+    opt.dataset.id = v.id;
+    const label = v.label || v.id;
+    const mark = (label.match(/★★★ 推荐|★★ 常用/) || [''])[0];
+    const base = label.replace(/\s*★★★ 推荐\s*|\s*★★ 常用\s*/g, '').trim();
+    opt.textContent = base;
+    if (mark) {
+      const span = document.createElement('span');
+      span.className = 'mark';
+      span.textContent = mark;
+      opt.appendChild(span);
+    }
+    opt.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      input.value = v.id;
+      btn.textContent = label;
+      menu.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === opt));
+      closeVoiceMenu();
+    });
+    if (v.id === currentId) {
+      opt.classList.add('active');
+      chosen = v;
+    }
+    menu.appendChild(opt);
+  });
+  if (!chosen && list && list.length) {
+    chosen = list[0];
+    const first = menu.querySelector('button');
+    if (first) first.classList.add('active');
+  }
+  if (chosen) {
+    input.value = chosen.id;
+    btn.textContent = chosen.label || chosen.id;
+  } else {
+    btn.textContent = '请选择音色';
+  }
+}
+
+async function refreshVoices() {
+  const engine = $('ttsEngine').value;
+  closeVoiceMenu();
+  try {
+    const list = await api('/api/tts/voices?engine=' + encodeURIComponent(engine));
+    const current = $('voice').value;
+    const inList = (list || []).some(v => v.id === current);
+    renderVoiceOptions(list || [], inList ? current : '');
+  } catch (e) { alert(e.message || e); }
+}
+
+document.addEventListener('click', (ev) => {
+  const combo = $('voiceCombo');
+  if (!combo) return;
+  if (combo.contains(ev.target)) {
+    if (ev.target.id === 'voiceSelectBtn' || ev.target.closest('#voiceSelectBtn')) {
+      $('voiceSelectMenu').classList.toggle('open');
+    }
+    return;
+  }
+  closeVoiceMenu();
+});
 
 async function pollLogs() {
   const data = await api('/api/logs');

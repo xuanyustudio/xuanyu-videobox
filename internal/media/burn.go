@@ -9,14 +9,23 @@ import (
 
 // BurnSubtitles muxes video with an SRT burned in via the subtitles filter.
 func BurnSubtitles(ctx context.Context, bins FFmpegBins, videoPath, srtPath, outPath string) error {
+	return BurnSubtitlesWithForceStyle(ctx, bins, videoPath, srtPath, outPath, "")
+}
+
+// BurnSubtitlesWithForceStyle burns an SRT, optionally with an ASS force_style string.
+func BurnSubtitlesWithForceStyle(ctx context.Context, bins FFmpegBins, videoPath, srtPath, outPath, forceStyle string) error {
 	if bins.FFmpeg == "" {
 		return fmt.Errorf("ffmpeg binary required")
 	}
 	filterPath := escapeSubtitlesFilterPath(videoPath, srtPath)
+	vf := "subtitles=" + filterPath
+	if strings.TrimSpace(forceStyle) != "" {
+		vf += ":force_style='" + forceStyle + "'"
+	}
 	args := []string{
 		"-y",
 		"-i", videoPath,
-		"-vf", "subtitles=" + filterPath,
+		"-vf", vf,
 		"-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
 		"-pix_fmt", "yuv420p",
 		"-c:a", "copy",

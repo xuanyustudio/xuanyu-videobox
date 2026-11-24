@@ -1,6 +1,9 @@
 package tts
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // VoiceOption is a selectable Edge TTS voice shown in the UI.
 type VoiceOption struct {
@@ -52,9 +55,9 @@ func NormalizeVoiceID(id string) string {
 	return id
 }
 
-// VoiceLabels returns dropdown labels in the same order as EdgeVoices.
+// VoiceLabels returns ranked dropdown labels (recommendation grades included).
 func VoiceLabels() []string {
-	vs := EdgeVoices()
+	vs := RankedEdgeVoices()
 	out := make([]string, 0, len(vs))
 	for _, v := range vs {
 		out = append(out, v.Label)
@@ -62,26 +65,62 @@ func VoiceLabels() []string {
 	return out
 }
 
-// VoiceIDForLabel maps a UI label back to the Edge voice ID.
+// VoiceIDForLabel maps a UI label (with or without a grade) back to the Edge voice ID.
 func VoiceIDForLabel(label string) string {
+	label = StripRatingMark(label)
 	for _, v := range EdgeVoices() {
-		if v.Label == label {
+		if v.Label == label || strings.EqualFold(v.ID, label) {
 			return v.ID
 		}
 	}
 	return NormalizeVoiceID(label)
 }
 
-// LabelForVoiceID maps a stored voice ID to the dropdown label.
+// LabelForVoiceID maps a stored voice ID to the ranked dropdown label.
 func LabelForVoiceID(id string) string {
 	id = NormalizeVoiceID(id)
-	for _, v := range EdgeVoices() {
+	for _, v := range RankedEdgeVoices() {
 		if strings.EqualFold(v.ID, id) {
 			return v.Label
 		}
 	}
 	if id == "" {
-		return EdgeVoices()[0].Label
+		return VoiceLabels()[0]
 	}
 	return id
+}
+
+// RankedEdgeVoices returns Edge voices sorted by recommendation (high first),
+// with grades already appended to labels.
+func RankedEdgeVoices() []VoiceOption {
+	vs := append([]VoiceOption(nil), EdgeVoices()...)
+	sort.SliceStable(vs, func(i, j int) bool {
+		return EdgeRecommendation(vs[i].ID) > EdgeRecommendation(vs[j].ID)
+	})
+	out := make([]VoiceOption, len(vs))
+	for i, v := range vs {
+		out[i] = VoiceOption{ID: v.ID, Label: WithRatingMark(v.Label, EdgeRecommendation(v.ID))}
+	}
+	return out
+}
+
+// IsEdgeVoice reports whether id is a known Edge Neural voice, a Chinese label
+// for one, or a typical zh-*-*Neural identifier.
+func IsEdgeVoice(id string) bool {
+	id = NormalizeVoiceID(StripRatingMark(id))
+	if id == "" {
+		return false
+	}
+	for _, v := range EdgeVoices() {
+		if strings.EqualFold(v.ID, id) || v.Label == id || StripRatingMark(v.Label) == id {
+			return true
+		}
+	}
+	if strings.Contains(id, "Neural") {
+		lower := strings.ToLower(id)
+		if strings.HasPrefix(lower, "zh-cn") || strings.HasPrefix(lower, "zh-hk") || strings.HasPrefix(lower, "zh-tw") {
+			return true
+		}
+	}
+	return false
 }
