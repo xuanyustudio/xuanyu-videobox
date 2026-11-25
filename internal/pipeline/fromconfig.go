@@ -66,6 +66,7 @@ func ApplyConfig(p *Params, cfg *config.Config) {
 	burn := cfg.UI.SubtitleBurnEnabled
 	p.BurnSubtitles = &burn
 	p.SubtitlePosition = cfg.UI.SubtitlePosition
+	p.SubtitleOnMask = cfg.UI.SubtitleOnMask
 	style := subtitleburn.DefaultStyle()
 	if font := strings.TrimSpace(cfg.UI.SubtitleFont); font != "" {
 		style.FontName = font

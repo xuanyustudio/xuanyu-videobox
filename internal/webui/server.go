@@ -856,6 +856,7 @@ func mergeWebSettings(dst, src *config.Config) {
 	if src.UI.SubtitleFont != "" || src.UI.AspectRatio != "" || src.UI.Resolution != "" || src.UI.BGMSource != "" {
 		dst.UI.SubtitleBurnEnabled = src.UI.SubtitleBurnEnabled
 		dst.UI.SubtitleMaskEnabled = src.UI.SubtitleMaskEnabled
+		dst.UI.SubtitleOnMask = src.UI.SubtitleOnMask
 	}
 	if src.UI.SubtitleMaskY != 0 {
 		dst.UI.SubtitleMaskY = src.UI.SubtitleMaskY

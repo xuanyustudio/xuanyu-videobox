@@ -79,7 +79,7 @@ func newScriptPage(state *AppState) (fyne.CanvasObject, func()) {
 			status.SetText("无法读取片源时长: " + err.Error())
 			return
 		}
-		seg, localTs, err := script.LocalizeItemTimes(item.VideoID, ts, spans)
+		seg, localTs, err := script.LocalizeItem(item, spans)
 		if err != nil {
 			status.SetText(fmt.Sprintf("第 %d 条无法匹配片源: %s", i+1, err.Error()))
 			return

@@ -758,6 +758,8 @@ func newRenderPage(state *AppState) fyne.CanvasObject {
 	default:
 		posSelect.SetSelected("底部")
 	}
+	onMaskCheck := widget.NewCheck("解说字幕显示在遮罩上", nil)
+	onMaskCheck.SetChecked(state.Cfg.UI.SubtitleOnMask)
 
 	// --- picture ---
 	aspectSelect := widget.NewSelect([]string{"源视频", "竖屏 9:16", "横屏 16:9"}, nil)
@@ -934,6 +936,7 @@ func newRenderPage(state *AppState) fyne.CanvasObject {
 		default:
 			cfg.UI.SubtitlePosition = "bottom"
 		}
+		cfg.UI.SubtitleOnMask = onMaskCheck.Checked
 		switch aspectSelect.Selected {
 		case "竖屏 9:16":
 			cfg.UI.AspectRatio = media.AspectVertical
@@ -1297,7 +1300,7 @@ func newRenderPage(state *AppState) fyne.CanvasObject {
 	))
 
 	subCard := widget.NewCard("字幕与画面", "", container.NewVBox(
-		burnCheck, hideCheck,
+		burnCheck, hideCheck, onMaskCheck,
 		widget.NewForm(
 			widget.NewFormItem("字体", fontSelect),
 			widget.NewFormItem("字号", shortSlide(fontSizeSlider, fontSizeVal)),

@@ -150,6 +150,9 @@ func TestRenderSettingsDefaultsAndRoundTrip(t *testing.T) {
 	if !cfg.UI.SubtitleBurnEnabled || cfg.UI.AspectRatio != "vertical" || cfg.UI.Resolution != "1080p" {
 		t.Fatalf("ui defaults: %#v", cfg.UI)
 	}
+	if cfg.UI.SubtitleOnMask {
+		t.Fatal("subtitle on mask must stay off by default")
+	}
 	if cfg.UI.VoiceVolume != 1 || cfg.UI.OriginalVolume != 1.2 || cfg.UI.BGMVolume != 0.3 {
 		t.Fatalf("volume defaults: %#v", cfg.UI)
 	}
@@ -167,6 +170,7 @@ func TestRenderSettingsDefaultsAndRoundTrip(t *testing.T) {
 	cfg.UI.SubtitleFontSize = 22
 	cfg.UI.SubtitleColor = "#FFFF00"
 	cfg.UI.SubtitlePosition = "top"
+	cfg.UI.SubtitleOnMask = true
 	cfg.UI.SubtitleMaskEnabled = true
 	cfg.UI.SubtitleMaskY = 80
 	cfg.UI.SubtitleMaskHeight = 16
@@ -190,7 +194,7 @@ func TestRenderSettingsDefaultsAndRoundTrip(t *testing.T) {
 	if got.TTS.Engine != "minimax" || got.TTS.Voice != "XuanyuTestVoice" || got.TTS.Speed != 1.2 || got.TTS.Pitch != -2 {
 		t.Fatalf("tts: %#v", got.TTS)
 	}
-	if got.UI.SubtitleBurnEnabled || got.UI.AspectRatio != "horizontal" || got.UI.Resolution != "720p" {
+	if got.UI.SubtitleBurnEnabled || got.UI.AspectRatio != "horizontal" || got.UI.Resolution != "720p" || !got.UI.SubtitleOnMask {
 		t.Fatalf("ui: %#v", got.UI)
 	}
 	if got.UI.BGMSource != "library" || got.UI.BGMPath != "/tmp/theme.mp3" {

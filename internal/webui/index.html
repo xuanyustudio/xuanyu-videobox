@@ -195,6 +195,7 @@
     </div>
     <label><input id="burnSubs" type="checkbox" checked/> 烧录解说字幕</label>
     <label><input id="hideOstRender" type="checkbox" checked/> 原片段隐藏解说字幕</label>
+    <label><input id="subOnMask" type="checkbox"/> 解说字幕显示在遮罩上（不勾选则按「位置」）</label>
     <div class="row cols-3">
       <div><label>字体</label><input id="subFont" value="Microsoft YaHei"/></div>
       <div><label>字号</label><input id="subSize" type="number" min="10" max="72" value="15"/></div>
@@ -415,6 +416,7 @@ function fillSettings(cfg, cfgPath, root) {
   $('subSize').value = cfg.ui?.subtitle_font_size || 15;
   $('subColor').value = cfg.ui?.subtitle_color || '#FFFFFF';
   $('subPos').value = cfg.ui?.subtitle_position || 'bottom';
+  $('subOnMask').checked = !!cfg.ui?.subtitle_on_mask;
   $('aspect').value = cfg.ui?.aspect_ratio || 'vertical';
   $('resolution').value = cfg.ui?.resolution || '1080p';
   $('maskEnabled').checked = !!cfg.ui?.subtitle_mask_enabled;
@@ -611,6 +613,7 @@ function collectRenderSettings() {
       subtitle_font_size: +$('subSize').value || 15,
       subtitle_color: $('subColor').value,
       subtitle_position: $('subPos').value,
+      subtitle_on_mask: $('subOnMask').checked,
       subtitle_mask_enabled: $('maskEnabled').checked,
       subtitle_mask_y: +$('maskY').value || 0,
       subtitle_mask_height: +$('maskH').value || 0,

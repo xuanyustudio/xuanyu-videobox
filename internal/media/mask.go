@@ -117,6 +117,63 @@ func ResolveSubtitleMask(videoW, videoH int, m SubtitleMask) MaskRegion {
 	}
 }
 
+// OutputMaskRect maps the mask onto the final frame. The layout draws the
+// mask on the source, then scales to cover dst and center-crops. A zero
+// destination size means the frame was not resized.
+func OutputMaskRect(srcW, srcH, dstW, dstH int, mask SubtitleMask) MaskRegion {
+	mask.Enabled = true
+	if dstW < 2 || dstH < 2 {
+		dstW, dstH = srcW, srcH
+	}
+	if srcW < 2 || srcH < 2 {
+		srcW, srcH = dstW, dstH
+	}
+	region := ResolveSubtitleMask(srcW, srcH, mask)
+	if srcW == dstW && srcH == dstH {
+		return region
+	}
+	scaleW := float64(dstW) / float64(srcW)
+	scaleH := float64(dstH) / float64(srcH)
+	scale := scaleW
+	if scaleH > scaleW {
+		scale = scaleH
+	}
+	cropX := (float64(srcW)*scale - float64(dstW)) / 2
+	cropY := (float64(srcH)*scale - float64(dstH)) / 2
+	x := int(math.Round(float64(region.X)*scale - cropX))
+	y := int(math.Round(float64(region.Y)*scale - cropY))
+	w := int(math.Round(float64(region.W) * scale))
+	h := int(math.Round(float64(region.H) * scale))
+	if w < 2 {
+		w = 2
+	}
+	if h < 2 {
+		h = 2
+	}
+	if x < 0 {
+		w += x
+		x = 0
+	}
+	if y < 0 {
+		h += y
+		y = 0
+	}
+	if x+w > dstW {
+		w = dstW - x
+	}
+	if y+h > dstH {
+		h = dstH - y
+	}
+	if w < 2 {
+		w = 2
+	}
+	if h < 2 {
+		h = 2
+	}
+	region.X, region.Y, region.W, region.H = x, y, w, h
+	return region
+}
+
 // SubtitleMaskFilter builds an ffmpeg video filter that blurs the region
 // and darkens it so burned-in source subtitles are covered.
 func SubtitleMaskFilter(videoW, videoH int, m SubtitleMask) string {
