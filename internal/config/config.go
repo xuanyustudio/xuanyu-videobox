@@ -67,6 +67,7 @@ type UI struct {
 	SubtitleFontSize       int     `yaml:"subtitle_font_size" json:"subtitle_font_size"`
 	SubtitleColor          string  `yaml:"subtitle_color" json:"subtitle_color"`
 	SubtitlePosition       string  `yaml:"subtitle_position" json:"subtitle_position"` // bottom | top | center
+	SubtitleOnMask         bool    `yaml:"subtitle_on_mask" json:"subtitle_on_mask"`   // burn narration on the mask; default keeps subtitle_position
 	SubtitleMaskX          float64 `yaml:"subtitle_mask_x" json:"subtitle_mask_x"`
 	SubtitleMaskY          float64 `yaml:"subtitle_mask_y" json:"subtitle_mask_y"`
 	SubtitleMaskWidth      float64 `yaml:"subtitle_mask_width" json:"subtitle_mask_width"`

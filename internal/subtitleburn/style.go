@@ -3,6 +3,8 @@ package subtitleburn
 import (
 	"fmt"
 	"strings"
+
+	"github.com/narratoai/narrato-go/internal/media"
 )
 
 // Style is the ASS force_style used when burning a subtitle.
@@ -62,7 +64,7 @@ func ForceStyle(s Style) string {
 	}
 	return fmt.Sprintf("FontSize=%d,FontName=%s,PrimaryColour=%s,OutlineColour=%s,Outline=%d,Shadow=%d,MarginV=%d,Alignment=%d",
 		clamp(s.FontSize, 10, 72), fn, hexToAssBGR(s.PrimaryColor), hexToAssBGR(s.OutlineColor),
-		clamp(s.Outline, 0, 8), clamp(s.Shadow, 0, 8), clamp(s.MarginV, 0, 200), clamp(align, 1, 9))
+		clamp(s.Outline, 0, 8), clamp(s.Shadow, 0, 8), clamp(s.MarginV, 0, 4096), clamp(align, 1, 9))
 }
 
 func hexToAssBGR(hex string) string {
@@ -103,5 +105,52 @@ func ApplyPosition(style Style, position string) Style {
 			style.MarginV = 36
 		}
 	}
+	return style
+}
+
+// BurnStyle applies the saved position. When onMask is set, the narration
+// is moved onto the mask band instead. onMask false leaves position unchanged.
+func BurnStyle(style Style, position string, onMask bool, srcW, srcH, dstW, dstH int, mask media.SubtitleMask) Style {
+	style = ApplyPosition(style, position)
+	if !onMask {
+		return style
+	}
+	return PlaceOnMask(style, srcW, srcH, dstW, dstH, mask)
+}
+
+// PlaceOnMask sets alignment and MarginV so the cue sits inside the mask
+// on the output frame. The mask is drawn on the source and then scaled and
+// center-cropped, so the band is mapped through that same transform.
+func PlaceOnMask(style Style, srcW, srcH, dstW, dstH int, mask media.SubtitleMask) Style {
+	if dstW < 2 || dstH < 2 {
+		dstW, dstH = srcW, srcH
+	}
+	if dstW < 2 {
+		dstW = 1080
+	}
+	if dstH < 2 {
+		dstH = 1920
+	}
+	region := media.OutputMaskRect(srcW, srcH, dstW, dstH, mask)
+	font := style.FontSize
+	if font <= 0 {
+		font = DefaultStyle().FontSize
+	}
+	center := region.Y + region.H/2
+	if center < dstH/3 {
+		style.Alignment = 8
+		margin := center - font/2
+		if margin < 0 {
+			margin = 0
+		}
+		style.MarginV = margin
+		return style
+	}
+	style.Alignment = 2
+	margin := dstH - center - font/2
+	if margin < 0 {
+		margin = 0
+	}
+	style.MarginV = margin
 	return style
 }

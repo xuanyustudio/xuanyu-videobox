@@ -82,7 +82,7 @@ func TestNormalizeItemSourceWritesLocalTimestamp(t *testing.T) {
 	if item.Timestamp != "00:00:03,280-00:00:20,280" {
 		t.Fatalf("timestamp %s", item.Timestamp)
 	}
-	if item.VideoName != "2.mp4" {
+	if item.VideoName != spans[1].Name {
 		t.Fatalf("name %s", item.VideoName)
 	}
 }
@@ -92,5 +92,81 @@ func TestResolveItemSourcePastAllVideos(t *testing.T) {
 	_, _, err := ResolveItemSource(0, TotalDurationMs(spans)+1000, spans)
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestExplicitLaterEpisodeNotRemappedToFirst(t *testing.T) {
+	// Episode 1 is long enough that a 2-minute clock value sits inside it.
+	// The script names episode 2, whose own file is only 90s. Selection must
+	// stay on episode 2 instead of playing episode 1 for that range.
+	spans := BuildSourceTimeline(
+		[]string{`E:\v\1.mp4`, `E:\v\2.mp4`},
+		[]int{600000, 90000},
+	)
+	seg, local, err := resolveItemSource(2, "", 120000, spans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seg.VideoID != 2 || local != 120000 {
+		t.Fatalf("got video %d local %d", seg.VideoID, local)
+	}
+}
+
+func TestVideoNameUnsticksDefaultEpisodeOne(t *testing.T) {
+	spans := testSpans()
+	seg, local, err := resolveItemSource(1, spans[1].Name, 60000, spans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seg.VideoID != 2 || local != 60000 {
+		t.Fatalf("got video %d local %d", seg.VideoID, local)
+	}
+}
+
+func TestVideoNameDoesNotOverrideLaterEpisode(t *testing.T) {
+	spans := testSpans()
+	seg, local, err := resolveItemSource(3, `1.mp4`, 30000, spans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seg.VideoID != 3 || local != 30000 {
+		t.Fatalf("got video %d local %d", seg.VideoID, local)
+	}
+}
+
+func TestGlobalTimestampOnMatchingLaterEpisode(t *testing.T) {
+	spans := testSpans()
+	seg, local, err := resolveItemSource(2, "", 323000, spans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seg.VideoID != 2 || local != 323000-174720 {
+		t.Fatalf("got video %d local %d", seg.VideoID, local)
+	}
+}
+
+func TestLocalizeItemFollowsScriptEpisodeOrder(t *testing.T) {
+	spans := BuildSourceTimeline(
+		[]string{"1.mp4", "2.mp4", "3.mp4"},
+		[]int{600000, 120000, 120000},
+	)
+	items := []Item{
+		{VideoID: 2, Timestamp: "00:00:05,000-00:00:12,000"},
+		{VideoIndex: 3, Timestamp: "00:00:01,000-00:00:04,000"},
+		{VideoID: 1, SourceVideo: "2.mp4", Timestamp: "00:00:20,000-00:00:28,000"},
+		{VideoID: 1, Timestamp: "00:11:00,000-00:11:08,000"},
+	}
+	want := []int{2, 3, 2, 2}
+	for i, item := range items {
+		seg, ts, err := LocalizeItem(item, spans)
+		if err != nil {
+			t.Fatalf("item %d: %v", i+1, err)
+		}
+		if seg.VideoID != want[i] {
+			t.Fatalf("item %d video %d want %d (%s)", i+1, seg.VideoID, want[i], ts)
+		}
+		if _, _, err := ParseTimestampRange(ts); err != nil {
+			t.Fatalf("item %d local timestamp %s: %v", i+1, ts, err)
+		}
 	}
 }

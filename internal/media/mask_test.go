@@ -32,6 +32,22 @@ func TestSubtitleMaskFilterContainsBlurAndBox(t *testing.T) {
 	}
 }
 
+func TestOutputMaskRectSameFrame(t *testing.T) {
+	mask := media.SubtitleMask{Y: 79, Height: 16}
+	got := media.OutputMaskRect(1080, 1920, 1080, 1920, mask)
+	want := media.ResolveSubtitleMask(1080, 1920, media.SubtitleMask{Enabled: true, Y: 79, Height: 16})
+	if got.X != want.X || got.Y != want.Y || got.W != want.W || got.H != want.H {
+		t.Fatalf("got %+v want %+v", got, want)
+	}
+}
+
+func TestOutputMaskRectStaysInsideCroppedFrame(t *testing.T) {
+	got := media.OutputMaskRect(1920, 1080, 1080, 1920, media.SubtitleMask{Y: 78, Height: 14})
+	if got.Y < 0 || got.H < 2 || got.Y+got.H > 1920 || got.X < 0 || got.X+got.W > 1080 {
+		t.Fatalf("band outside frame: %+v", got)
+	}
+}
+
 func TestSubtitleMaskDisabled(t *testing.T) {
 	if media.SubtitleMaskFilter(1920, 1080, media.SubtitleMask{}) != "" {
 		t.Fatal("disabled mask should yield empty filter")

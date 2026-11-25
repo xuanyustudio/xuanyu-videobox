@@ -38,6 +38,7 @@ type Params struct {
 	BurnSubtitles    *bool // nil → true
 	SubtitleStyle    subtitleburn.Style
 	SubtitlePosition string
+	SubtitleOnMask   bool // place burned narration on the mask; default keeps SubtitlePosition
 
 	Mask       media.SubtitleMask
 	Aspect     string // source | vertical | horizontal; empty = keep source size
@@ -157,7 +158,7 @@ func Run(ctx context.Context, p Params) (outputMP4 string, err error) {
 		if ts == "" {
 			return "", fmt.Errorf("第 %d 条脚本缺少时间范围", i+1)
 		}
-		seg, localTs, err := script.LocalizeItemTimes(item.VideoID, ts, sourceTimeline)
+		seg, localTs, err := script.LocalizeItem(*item, sourceTimeline)
 		if err != nil {
 			return "", fmt.Errorf("第 %d 条脚本无法匹配片源: %w", i+1, err)
 		}
@@ -308,7 +309,7 @@ func Run(ctx context.Context, p Params) (outputMP4 string, err error) {
 			return "", fmt.Errorf("copy output: %w", err)
 		}
 	} else {
-		style := subtitleburn.ApplyPosition(p.SubtitleStyle, p.SubtitlePosition)
+		style := burnStyle(ctx, bins, p, layout, mixedPath)
 		force := subtitleburn.ForceStyle(style)
 		if err := media.BurnSubtitlesWithForceStyle(ctx, bins, mixedPath, srtPath, outPath, force); err != nil {
 			return "", fmt.Errorf("burn subtitles: %w", err)
@@ -335,7 +336,7 @@ func validateClipRanges(ctx context.Context, bins media.FFmpegBins, items []scri
 		if ts == "" {
 			return fmt.Errorf("第 %d 条脚本缺少时间范围", i+1)
 		}
-		seg, localTs, err := script.LocalizeItemTimes(item.VideoID, ts, sourceTimeline)
+		seg, localTs, err := script.LocalizeItem(item, sourceTimeline)
 		if err != nil {
 			lines = append(lines, fmt.Sprintf("第 %d 条  %s  %s", i+1, ts, err.Error()))
 			continue
@@ -557,6 +558,22 @@ func volumeOr(v, fallback float64) float64 {
 		return 2
 	}
 	return v
+}
+
+func burnStyle(ctx context.Context, bins media.FFmpegBins, p Params, layout media.VideoLayout, mixedPath string) subtitleburn.Style {
+	dstW, dstH := layout.Width, layout.Height
+	if dstW < 2 || dstH < 2 {
+		if sz, err := media.ProbeVideoSize(ctx, bins, mixedPath); err == nil {
+			dstW, dstH = sz.Width, sz.Height
+		}
+	}
+	srcW, srcH := dstW, dstH
+	if len(p.VideoPaths) > 0 {
+		if sz, err := media.ProbeVideoSize(ctx, bins, p.VideoPaths[0]); err == nil && sz.Width > 0 && sz.Height > 0 {
+			srcW, srcH = sz.Width, sz.Height
+		}
+	}
+	return subtitleburn.BurnStyle(p.SubtitleStyle, p.SubtitlePosition, p.SubtitleOnMask, srcW, srcH, dstW, dstH, p.Mask)
 }
 
 func resolveLayout(ctx context.Context, bins media.FFmpegBins, p Params) (media.VideoLayout, string, error) {

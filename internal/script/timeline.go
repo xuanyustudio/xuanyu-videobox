@@ -10,8 +10,8 @@ import (
 // Videos are laid end-to-end in list order: item timestamps that continue
 // past the first file belong to later files at a local offset.
 type SourceSegment struct {
-	Index      int    // 0-based index in VideoPaths
-	VideoID    int    // 1-based id stored on script items
+	Index      int // 0-based index in VideoPaths
+	VideoID    int // 1-based id stored on script items
 	Path       string
 	Name       string
 	DurationMs int
@@ -70,26 +70,77 @@ func MapGlobalTime(spans []SourceSegment, globalMs int) (SourceSegment, int, boo
 
 // ResolveItemSource decides which file a script row should be cut from.
 //
-// video_id is 1-based. If it is set and startMs fits inside that file, the
-// timestamp is treated as local to that file (how the editor saves a row).
-// Otherwise startMs is treated as a time on the concatenated global timeline,
-// so rows that the LLM left on video_id=0 but continued past the first file
-// land on the correct later video.
+// video_id is 1-based. When it names a file and startMs fits inside that
+// file, the timestamp is local to that file (how the editor saves a row).
+// A timestamp past episode 1, with video_id unset or left at the default 1,
+// is a time on the concatenated global timeline. An explicit later episode
+// is never replaced by episode 1 just because the clock value also falls
+// inside the first file.
 func ResolveItemSource(videoID, startMs int, spans []SourceSegment) (SourceSegment, int, error) {
+	return resolveItemSource(videoID, "", startMs, spans)
+}
+
+func resolveItemSource(videoID int, videoName string, startMs int, spans []SourceSegment) (SourceSegment, int, error) {
 	if len(spans) == 0 {
 		return SourceSegment{}, 0, fmt.Errorf("没有可用的片源")
+	}
+	if named := matchVideoName(videoName, spans); named > 0 && (videoID <= 1 || named == videoID) {
+		// A file name can correct the default video_id=1. It must not
+		// pull an explicit later episode back to the first file.
+		videoID = named
 	}
 	if videoID >= 1 && videoID <= len(spans) {
 		seg := spans[videoID-1]
 		if startMs >= 0 && startMs < seg.DurationMs {
 			return seg, startMs, nil
 		}
+		if mapped, local, ok := MapGlobalTime(spans, startMs); ok && mapped.VideoID == seg.VideoID {
+			return mapped, local, nil
+		}
+		if videoID == 1 {
+			if mapped, local, ok := MapGlobalTime(spans, startMs); ok {
+				return mapped, local, nil
+			}
+		}
+		// Keep the script's episode. The clip step reports a range past
+		// that file instead of silently playing episode 1.
+		return seg, startMs, nil
 	}
 	if seg, local, ok := MapGlobalTime(spans, startMs); ok {
 		return seg, local, nil
 	}
 	total := TotalDurationMs(spans)
 	return SourceSegment{}, 0, fmt.Errorf("时间 %s 已超出全部素材合计时长 %s", FormatTimestampMs(startMs), FormatTimestampMs(total))
+}
+
+// matchVideoName returns a 1-based video id when name is a source file name.
+func matchVideoName(name string, spans []SourceSegment) int {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0
+	}
+	base := strings.ToLower(filepath.Base(name))
+	for _, seg := range spans {
+		if strings.ToLower(seg.Name) == base || strings.ToLower(filepath.Base(seg.Path)) == base {
+			return seg.VideoID
+		}
+	}
+	return 0
+}
+
+func itemSourceHint(item *Item) (int, string) {
+	if item == nil {
+		return 0, ""
+	}
+	id := item.VideoID
+	if id <= 0 {
+		id = item.VideoIndex
+	}
+	name := strings.TrimSpace(item.VideoName)
+	if name == "" {
+		name = strings.TrimSpace(item.SourceVideo)
+	}
+	return id, name
 }
 
 // NormalizeItemSource writes 1-based video_id and a local timestamp onto item
@@ -102,7 +153,8 @@ func NormalizeItemSource(item *Item, spans []SourceSegment) error {
 	if err != nil {
 		return err
 	}
-	seg, localStart, err := ResolveItemSource(item.VideoID, startMs, spans)
+	id, name := itemSourceHint(item)
+	seg, localStart, err := resolveItemSource(id, name, startMs, spans)
 	if err != nil {
 		return err
 	}
@@ -164,11 +216,24 @@ func FormatTimestampRange(startMs, endMs int) string {
 // LocalizeItemTimes maps a stored timestamp onto the correct source video
 // and returns a timestamp that is local to that file.
 func LocalizeItemTimes(videoID int, timestamp string, spans []SourceSegment) (SourceSegment, string, error) {
+	return localizeTimes(videoID, "", timestamp, spans)
+}
+
+// LocalizeItem maps one script row onto its source file. video_id,
+// video_index, video_name and source_video are all consulted, in that order,
+// so a commentary row is not stuck on episode 1 when the script names
+// another episode.
+func LocalizeItem(item Item, spans []SourceSegment) (SourceSegment, string, error) {
+	id, name := itemSourceHint(&item)
+	return localizeTimes(id, name, item.Timestamp, spans)
+}
+
+func localizeTimes(videoID int, videoName, timestamp string, spans []SourceSegment) (SourceSegment, string, error) {
 	startMs, endMs, err := ParseTimestampRange(timestamp)
 	if err != nil {
 		return SourceSegment{}, "", err
 	}
-	seg, localStart, err := ResolveItemSource(videoID, startMs, spans)
+	seg, localStart, err := resolveItemSource(videoID, videoName, startMs, spans)
 	if err != nil {
 		return SourceSegment{}, "", err
 	}
