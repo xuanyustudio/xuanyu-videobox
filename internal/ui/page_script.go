@@ -69,27 +69,29 @@ func newScriptPage(state *AppState) (fyne.CanvasObject, func()) {
 		}
 		item := state.Project.ScriptItems[i]
 		ts := strings.TrimSpace(item.Timestamp)
-		vid := item.VideoID
-		if vid <= 0 {
-			vid = 1
-		}
-		idx := vid - 1
-		if idx < 0 || idx >= len(state.Project.VideoPaths) {
-			status.SetText(fmt.Sprintf("第 %d 条视频序号 %d 超出素材列表（共 %d 个）", i+1, vid, len(state.Project.VideoPaths)))
-			return
-		}
-		video := state.Project.VideoPaths[idx]
-		ffmpegBin, err := media.ResolveFFmpeg(state.Cfg.FFmpeg.Path, "")
+		bins, err := scriptPreviewBins(state)
 		if err != nil {
-			status.SetText("找不到 ffmpeg: " + err.Error())
+			status.SetText(err.Error())
 			return
 		}
-		status.SetText(fmt.Sprintf("正在截取第 %d 条预览…", i+1))
+		spans, err := media.ProbeSourceTimeline(context.Background(), bins, state.Project.VideoPaths)
+		if err != nil {
+			status.SetText("无法读取片源时长: " + err.Error())
+			return
+		}
+		seg, localTs, err := script.LocalizeItemTimes(item.VideoID, ts, spans)
+		if err != nil {
+			status.SetText(fmt.Sprintf("第 %d 条无法匹配片源: %s", i+1, err.Error()))
+			return
+		}
+		video := seg.Path
+		ts = localTs
+		status.SetText(fmt.Sprintf("正在截取第 %d 条预览（%s）…", i+1, seg.Name))
 		go func() {
 			dir := filepath.Join(os.TempDir(), "narrato-preview")
 			_ = os.MkdirAll(dir, 0o755)
 			out := filepath.Join(dir, fmt.Sprintf("clip_%d.mp4", i+1))
-			err := media.PreviewClip(context.Background(), media.FFmpegBins{FFmpeg: ffmpegBin}, video, ts, out)
+			err := media.PreviewClip(context.Background(), bins, video, ts, out)
 			fyne.Do(func() {
 				if err != nil {
 					status.SetText("预览失败: " + err.Error())
@@ -273,7 +275,17 @@ func newScriptPage(state *AppState) (fyne.CanvasObject, func()) {
 			state.Cfg.UI.TargetDurationSec = t
 		}
 
-		subText, err := loadSubtitleText(state.Project.SubtitlePaths)
+		bins, berr := scriptPreviewBins(state)
+		if berr != nil {
+			warnLabel.SetText(berr.Error())
+			return
+		}
+		spans, err := media.ProbeSourceTimeline(context.Background(), bins, state.Project.VideoPaths)
+		if err != nil {
+			warnLabel.SetText("无法读取片源时长: " + err.Error())
+			return
+		}
+		subText, err := script.ComposeSubtitleText(state.Project.SubtitlePaths, spans)
 		if err != nil {
 			warnLabel.SetText(err.Error())
 			return
@@ -299,11 +311,15 @@ func newScriptPage(state *AppState) (fyne.CanvasObject, func()) {
 					warnLabel.SetText(fmt.Sprintf("生成失败: %v", err))
 					return
 				}
+				normNote := ""
+				if nerr := script.NormalizeItemsSource(items, spans); nerr != nil {
+					normNote = "；部分时间未能对应到片源：" + nerr.Error()
+				}
 				state.Project.ScriptItems = items
 				if err := project.Save(state.ProjectsRoot, state.Project); err != nil {
 					warnLabel.SetText(fmt.Sprintf("保存失败: %v", err))
 				} else {
-					warnLabel.SetText(fmt.Sprintf("已生成 %d 条", len(items)))
+					warnLabel.SetText(fmt.Sprintf("已生成 %d 条%s", len(items), normNote))
 				}
 				refresh()
 			})
@@ -334,24 +350,14 @@ func labeledField(title string, w fyne.CanvasObject) fyne.CanvasObject {
 	return container.NewVBox(lab, w)
 }
 
-func loadSubtitleText(paths []string) (string, error) {
-	if len(paths) == 0 {
-		return "", nil
+func scriptPreviewBins(state *AppState) (media.FFmpegBins, error) {
+	ffmpegBin, err := media.ResolveFFmpeg(state.Cfg.FFmpeg.Path, "")
+	if err != nil {
+		return media.FFmpegBins{}, fmt.Errorf("找不到 ffmpeg: %w", err)
 	}
-	var parts []string
-	for _, p := range paths {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		data, err := os.ReadFile(p)
-		if err != nil {
-			return "", fmt.Errorf("读取字幕 %s: %w", p, err)
-		}
-		text := script.StripSpeakerLabels(string(data))
-		if text != "" {
-			parts = append(parts, text)
-		}
+	ffprobeBin, err := media.ResolveFFprobe(state.Cfg.FFmpeg.FFprobePath, filepath.Dir(ffmpegBin))
+	if err != nil {
+		return media.FFmpegBins{}, fmt.Errorf("找不到 ffprobe: %w", err)
 	}
-	return strings.Join(parts, "\n\n"), nil
+	return media.FFmpegBins{FFmpeg: ffmpegBin, FFprobe: ffprobeBin}, nil
 }

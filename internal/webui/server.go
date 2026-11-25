@@ -374,18 +374,43 @@ func (s *server) handleScriptGenerate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "请先添加字幕文件路径", 400)
 		return
 	}
-	subPath := s.proj.SubtitlePaths[0]
+	if len(s.proj.VideoPaths) == 0 {
+		s.mu.Unlock()
+		http.Error(w, "请先添加视频", 400)
+		return
+	}
+	subPaths := append([]string(nil), s.proj.SubtitlePaths...)
+	videoPaths := append([]string(nil), s.proj.VideoPaths...)
 	cfg := *s.cfg
 	s.mu.Unlock()
 
-	data, err := os.ReadFile(subPath)
+	ffmpegBin, err := media.ResolveFFmpeg(cfg.FFmpeg.Path, "")
 	if err != nil {
-		http.Error(w, "读取字幕失败: "+err.Error(), 500)
+		http.Error(w, "找不到 ffmpeg: "+err.Error(), 500)
+		return
+	}
+	ffprobeBin, err := media.ResolveFFprobe(cfg.FFmpeg.FFprobePath, filepath.Dir(ffmpegBin))
+	if err != nil {
+		http.Error(w, "找不到 ffprobe: "+err.Error(), 500)
+		return
+	}
+	spans, err := media.ProbeSourceTimeline(r.Context(), media.FFmpegBins{FFmpeg: ffmpegBin, FFprobe: ffprobeBin}, videoPaths)
+	if err != nil {
+		http.Error(w, "无法读取片源时长: "+err.Error(), 500)
+		return
+	}
+	subText, err := script.ComposeSubtitleText(subPaths, spans)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	if strings.TrimSpace(subText) == "" {
+		http.Error(w, "请先添加或识别字幕", 400)
 		return
 	}
 	client := script.NewLLM(cfg.LLM.BaseURL, cfg.LLM.APIKey, cfg.LLM.Model)
 	items, err := client.GenerateScript(r.Context(), script.GenerateInput{
-		SubtitleText:  string(data),
+		SubtitleText:  subText,
 		WordCount:     body.WordCount,
 		OriginalRatio: body.OriginalRatio,
 	})
@@ -393,6 +418,7 @@ func (s *server) handleScriptGenerate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	_ = script.NormalizeItemsSource(items, spans)
 	s.mu.Lock()
 	s.proj.ScriptItems = items
 	s.mu.Unlock()

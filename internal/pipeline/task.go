@@ -142,21 +142,27 @@ func Run(ctx context.Context, p Params) (outputMP4 string, err error) {
 	}
 
 	report("clip", 25, "cutting segments")
-	if err := validateClipRanges(ctx, bins, workItems, p.VideoPaths, ttsDurByID); err != nil {
+	sourceTimeline, err := media.ProbeSourceTimeline(ctx, bins, p.VideoPaths)
+	if err != nil {
+		return "", err
+	}
+	if err := validateClipRanges(ctx, bins, workItems, p.VideoPaths, ttsDurByID, sourceTimeline); err != nil {
 		return "", err
 	}
 	clipPaths := make([]string, 0, len(workItems))
 	var timeline float64
 	for i := range workItems {
 		item := &workItems[i]
-		videoPath, err := resolveVideoPath(item.VideoID, p.VideoPaths)
-		if err != nil {
-			return "", fmt.Errorf("item %d video: %w", i, err)
-		}
 		ts := strings.TrimSpace(item.Timestamp)
 		if ts == "" {
-			return "", fmt.Errorf("item %d: timestamp required", i)
+			return "", fmt.Errorf("第 %d 条脚本缺少时间范围", i+1)
 		}
+		seg, localTs, err := script.LocalizeItemTimes(item.VideoID, ts, sourceTimeline)
+		if err != nil {
+			return "", fmt.Errorf("第 %d 条脚本无法匹配片源: %w", i+1, err)
+		}
+		videoPath := seg.Path
+		ts = localTs
 
 		id := item.ID
 		if id == 0 {
@@ -167,7 +173,7 @@ func Run(ctx context.Context, p Params) (outputMP4 string, err error) {
 
 		clipPath := filepath.Join(p.WorkDir, "clips", fmt.Sprintf("%d.mp4", i))
 		if err := media.ClipSegment(ctx, bins, videoPath, ts, item.OST, ttsDur, isHook, clipPath); err != nil {
-			return "", fmt.Errorf("裁剪第 %d 条脚本失败: %w", i+1, err)
+			return "", fmt.Errorf("裁剪第 %d 条脚本失败（片源「%s」）: %w", i+1, seg.Name, err)
 		}
 		if media.LayoutFilter(layout, media.VideoSize{}) != "" || layout.Mask.Enabled || (layout.Width >= 2 && layout.Height >= 2) {
 			srcSize, serr := media.ProbeVideoSize(ctx, bins, clipPath)
@@ -321,45 +327,35 @@ func hideOnOriginal(v *bool) bool {
 }
 
 
-func validateClipRanges(ctx context.Context, bins media.FFmpegBins, items []script.Item, videoPaths []string, ttsDurByID map[int]float64) error {
-	durCache := make(map[string]float64)
+func validateClipRanges(ctx context.Context, bins media.FFmpegBins, items []script.Item, videoPaths []string, ttsDurByID map[int]float64, sourceTimeline []script.SourceSegment) error {
 	var lines []string
 	for i := range items {
 		item := items[i]
-		videoPath, err := resolveVideoPath(item.VideoID, videoPaths)
-		if err != nil {
-			return fmt.Errorf("第 %d 条脚本的视频: %w", i+1, err)
-		}
 		ts := strings.TrimSpace(item.Timestamp)
 		if ts == "" {
 			return fmt.Errorf("第 %d 条脚本缺少时间范围", i+1)
+		}
+		seg, localTs, err := script.LocalizeItemTimes(item.VideoID, ts, sourceTimeline)
+		if err != nil {
+			lines = append(lines, fmt.Sprintf("第 %d 条  %s  %s", i+1, ts, err.Error()))
+			continue
 		}
 		id := item.ID
 		if id == 0 {
 			id = i + 1
 		}
-		startMs, endMs, err := media.PlanClipRange(ts, item.OST, ttsDurByID[id], item.HookSourceID != nil)
+		startMs, endMs, err := media.PlanClipRange(localTs, item.OST, ttsDurByID[id], item.HookSourceID != nil)
 		if err != nil {
 			return fmt.Errorf("第 %d 条脚本时间范围无效: %w", i+1, err)
 		}
-		srcDur, ok := durCache[videoPath]
-		if !ok {
-			d, perr := media.ProbeDurationSec(ctx, bins, videoPath)
-			if perr != nil || d <= 0 {
-				continue
-			}
-			srcDur = d
-			durCache[videoPath] = srcDur
-		}
-		sourceMs := int(srcDur*1000 + 0.5)
-		if _, _, ferr := media.FitClipRangeToSource(startMs, endMs, sourceMs); ferr != nil {
-			lines = append(lines, fmt.Sprintf("第 %d 条  %s  片源「%s」只有 %s", i+1, ts, filepath.Base(videoPath), media.FormatScriptClock(sourceMs)))
+		if _, _, ferr := media.FitClipRangeToSource(startMs, endMs, seg.DurationMs); ferr != nil {
+			lines = append(lines, fmt.Sprintf("第 %d 条  %s  对应片源「%s」（时长 %s）", i+1, ts, seg.Name, media.FormatScriptClock(seg.DurationMs)))
 		}
 	}
 	if len(lines) == 0 {
 		return nil
 	}
-	return fmt.Errorf("有 %d 条脚本的时间范围超出片源时长，无法裁剪：\n%s\n请缩短这些段落的时间轴，或在脚本里把它们指定到其他视频。", len(lines), strings.Join(lines, "\n"))
+	return fmt.Errorf("有 %d 条脚本的时间范围超出对应片源时长，无法裁剪：\n%s\n请调整这些段落的时间，或检查素材是否完整。", len(lines), strings.Join(lines, "\n"))
 }
 
 func resolveBins(bins media.FFmpegBins) (media.FFmpegBins, error) {
